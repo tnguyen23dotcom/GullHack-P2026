@@ -1,5 +1,6 @@
 """One place to import Person B's shared files: check_interface.py and prompt.py.
 
+We look at the repo root and in checks/ (B's folder), so either location works once merged.
 They live at the repo root on B's branch (issue #6). Until B's branch is merged into main
 (and main into person-c-eval), they are not in this branch, so we also look in the folder
 named by the environment variable GULLHACK_B_DIR. That lets you test against B's real files
@@ -17,7 +18,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-for _folder in (REPO_ROOT, os.environ.get("GULLHACK_B_DIR")):
+for _folder in (REPO_ROOT, REPO_ROOT / "checks", os.environ.get("GULLHACK_B_DIR")):
     if _folder and str(Path(_folder).resolve()) not in sys.path:
         sys.path.append(str(Path(_folder).resolve()))  # appended, so eval/ modules always win a name clash
 
