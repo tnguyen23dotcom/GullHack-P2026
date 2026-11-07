@@ -1,4 +1,5 @@
 # Generated embedding files: rebuild with build_embeddings.py
 data/embeddings/
+.venv/
 __pycache__/
 .pytest_cache/
