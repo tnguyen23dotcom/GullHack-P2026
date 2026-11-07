@@ -37,20 +37,46 @@ def _local_embed(text):
     return vec
 
 
-def _bedrock_embed(texts, region):
-    """Call Titan V2 once per text. boto3 finds credentials the usual way (your AWS CLI setup)."""
-    import boto3  # imported here so local mode works without boto3 installed
+PAUSE_SECONDS = 1.0   # short pause between calls: new AWS accounts often have low request limits
+MAX_ATTEMPTS = 8      # tries per text when Bedrock says "too many requests"
 
-    client = boto3.client("bedrock-runtime", region_name=region)
+
+def _bedrock_embed(texts, region):
+    """Call Titan V2 once per text. boto3 finds credentials the usual way (your AWS CLI setup).
+
+    If Bedrock answers ThrottlingException ("too many requests") we wait and retry with
+    growing pauses (2s, 4s, 8s ... up to 30s). Any other error is raised straight away.
+    """
+    import time
+
+    import boto3  # imported here so local mode works without boto3 installed
+    from botocore.config import Config
+    from botocore.exceptions import ClientError
+
+    # max_attempts=1 turns off boto3's own quick retries so only our slower loop retries.
+    client = boto3.client(
+        "bedrock-runtime", region_name=region, config=Config(retries={"max_attempts": 1, "mode": "standard"})
+    )
     vectors = []
-    for text in texts:
-        response = client.invoke_model(
-            modelId=BEDROCK_MODEL_ID,
-            contentType="application/json",
-            accept="application/json",
-            body=json.dumps({"inputText": text, "dimensions": BEDROCK_DIMS, "normalize": True}),
-        )
+    for i, text in enumerate(texts, start=1):
+        wait = 2.0
+        for attempt in range(1, MAX_ATTEMPTS + 1):
+            try:
+                response = client.invoke_model(
+                    modelId=BEDROCK_MODEL_ID,
+                    contentType="application/json",
+                    accept="application/json",
+                    body=json.dumps({"inputText": text, "dimensions": BEDROCK_DIMS, "normalize": True}),
+                )
+                break
+            except ClientError as err:
+                if err.response["Error"]["Code"] != "ThrottlingException" or attempt == MAX_ATTEMPTS:
+                    raise
+                print(f"  text {i}/{len(texts)}: throttled, waiting {wait:.0f}s (attempt {attempt}/{MAX_ATTEMPTS})")
+                time.sleep(wait)
+                wait = min(wait * 2, 30.0)
         vectors.append(json.loads(response["body"].read())["embedding"])
+        time.sleep(PAUSE_SECONDS)
     return np.array(vectors, dtype=np.float32)
 
 

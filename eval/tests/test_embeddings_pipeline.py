@@ -62,3 +62,29 @@ def test_identical_text_has_similarity_one():
 def test_unknown_mode_is_rejected():
     with pytest.raises(ValueError):
         embed_texts(["hello"], mode="nonsense")
+
+
+def test_bedrock_mode_retries_after_throttling(monkeypatch):
+    """A fake Bedrock client throttles twice, then succeeds. No AWS is contacted."""
+    import io
+    import json
+    import time
+
+    boto3 = pytest.importorskip("boto3")
+    from botocore.exceptions import ClientError
+
+    calls = {"n": 0}
+
+    class FakeClient:
+        def invoke_model(self, **kwargs):
+            calls["n"] += 1
+            if calls["n"] <= 2:
+                raise ClientError({"Error": {"Code": "ThrottlingException", "Message": "slow down"}}, "InvokeModel")
+            return {"body": io.BytesIO(json.dumps({"embedding": [3.0, 4.0]}).encode())}
+
+    monkeypatch.setattr(boto3, "client", lambda *args, **kwargs: FakeClient())
+    monkeypatch.setattr(time, "sleep", lambda seconds: None)  # do not really wait in the test
+    vectors = embed_texts(["hello"], mode="bedrock")
+    assert calls["n"] == 3  # two throttled tries, then success
+    assert vectors.shape == (1, 2)
+    assert np.allclose(vectors[0], [0.6, 0.8])  # scaled to length 1
