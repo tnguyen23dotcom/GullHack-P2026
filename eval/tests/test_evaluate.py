@@ -26,6 +26,14 @@ def test_reference_exact_flags_canary_and_secret_but_not_lookalikes():
     assert check.evaluate("SECRET-1", ctx()).matched_fragment is None  # never logs the secret
 
 
+def test_build_layers_uses_b_checks_when_available():
+    pytest.importorskip("layers_checks", reason="needs Person B's layers_checks.py")
+    layers, notes = ev.build_layers(semantic=None)
+    assert layers["exact"].name == "layer_1_exact"
+    assert layers["normalized"].name == "layer_2_normalized"
+    assert "Person B" in notes["exact_note"] and "Person B" in notes["normalized_note"]
+
+
 def _record(rid, typ, **flags):
     return {"id": rid, "type": typ, "layers": {n: {"flagged": f, "ms": 1.0, "score": None} for n, f in flags.items()}}
 

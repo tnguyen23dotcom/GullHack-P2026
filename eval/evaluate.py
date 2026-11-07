@@ -22,6 +22,7 @@ Examples (run from the repo root, with Person B's files available; see eval/b_co
   python3 eval/evaluate.py --mode local-model           # final numbers: test split, writes eval/results/
 """
 import argparse
+import importlib
 import json
 import statistics
 from pathlib import Path
@@ -37,18 +38,36 @@ DATA = EVAL / "data"
 ATTACK_TYPES = ["verbatim", "translation", "encoding", "obfuscation", "paraphrase"]
 
 
-def load_b_normalized_check():
-    """Person B's normalized check (#7), or None while it is not pushed.
+def load_b_checks():
+    """Person B's exact and normalized checks (#7) as (exact, normalized, module name), or (None, None, None).
 
-    TODO(#7): when B pushes the normalized check, import it here and return an instance,
-    and swap ReferenceExactCheck for B's exact check in build_layers().
+    B's file is layers_checks.py (its docstring says layer_checks.py, so both names are tried).
+    It is found the same way as B's other files (repo root, checks/, or GULLHACK_B_DIR).
     """
-    return None
+    for module_name in ("layers_checks", "layer_checks"):
+        try:
+            module = importlib.import_module(module_name)
+        except ModuleNotFoundError:
+            continue
+        return module.ExactMatchCheck(), module.NormalizedMatchCheck(), module_name
+    return None, None, None
 
 
 def build_layers(semantic):
-    """The layers in gateway order (cheapest first). A missing layer is None."""
-    return {"exact": ReferenceExactCheck(), "normalized": load_b_normalized_check(), "semantic": semantic}
+    """The layers in gateway order (cheapest first), plus notes on where each came from.
+
+    The exact layer is B's when available, else our reference check (so a baseline always exists).
+    The normalized layer is B's or None (reported as not available, never guessed).
+    """
+    b_exact, b_normalized, b_module = load_b_checks()
+    layers = {"exact": b_exact or ReferenceExactCheck(), "normalized": b_normalized, "semantic": semantic}
+    notes = {
+        "exact_note": f"Person B's ExactMatchCheck ({b_module}.py)." if b_exact
+        else "reference exact-match check in eval/ (Person B's exact check not available).",
+        "normalized_note": f"Person B's NormalizedMatchCheck ({b_module}.py)." if b_normalized
+        else "**not available yet** (Person B, issue #7).",
+    }
+    return layers, notes
 
 
 PIPELINES = {"baseline": ["exact"], "layered": ["exact", "normalized", "semantic"]}
@@ -158,7 +177,7 @@ def main():
         protected_chunks=list(PROTECTED_POLICIES),
     )
     semantic = SemanticCheck(threshold=locked["semantic_threshold"], mode=args.mode, region=args.region)
-    layers = build_layers(semantic)
+    layers, layer_notes = build_layers(semantic)
     available = [n for n, c in layers.items() if c is not None]
 
     # Warm-up: the first semantic call loads the model and embeds the policies (a "cold start").
@@ -171,8 +190,7 @@ def main():
         "split": args.split,
         "model": model_name(args.mode),
         "threshold": locked["semantic_threshold"],
-        "exact_note": "reference exact-match check in eval/ (Person B's exact check not pushed yet).",
-        "normalized_note": "Person B's check" if layers["normalized"] else "**not available yet** (Person B, issue #7).",
+        **layer_notes,
         "latency_note": f"measured on this machine's CPU, per reply, after a warm-up call; the semantic cold start "
                         f"(model load and policy embedding) took {cold:.0f} ms and is not in the per-reply numbers.",
     }
