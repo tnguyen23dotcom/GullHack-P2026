@@ -6,6 +6,11 @@
   "bedrock" Amazon Titan Text Embeddings V2 through Amazon Bedrock. Each call costs a
             tiny amount and needs AWS credentials plus Bedrock access.
 
+  "local-model"  A REAL multilingual embedding model run on this machine (sentence-transformers).
+            No AWS and free, but it needs `pip install sentence-transformers` and a one-time
+            model download (roughly half a GB). It is the fallback while Bedrock quotas are 0.
+            Always label any result with the model that produced it.
+
 Every vector is scaled to length 1, so cosine similarity is just a dot product.
 The semantic check (#13) will reuse embed_texts() so both sides use the same model.
 """
@@ -24,7 +29,16 @@ LOCAL_DIMS = 256
 
 def model_name(mode):
     """Label stored next to saved vectors so we always know where they came from."""
-    return BEDROCK_MODEL_ID if mode == "bedrock" else LOCAL_MODEL_NAME
+    if mode == "bedrock":
+        return BEDROCK_MODEL_ID
+    if mode == "local-model":
+        return REAL_LOCAL_MODEL_NAME
+    return LOCAL_MODEL_NAME
+
+
+def embeddings_filename(mode):
+    """File name for saved chunk vectors, for example amazon.titan-embed-text-v2_0.npz."""
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", model_name(mode)) + ".npz"
 
 
 def _local_embed(text):
@@ -35,6 +49,21 @@ def _local_embed(text):
         sign = 1.0 if (h >> 100) % 2 else -1.0
         vec[h % LOCAL_DIMS] += sign
     return vec
+
+
+LOCAL_MODEL_ID = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+REAL_LOCAL_MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
+_model_cache = {}  # the model is slow to load, so load it once per run
+
+
+def _local_model_embed(texts):
+    """Real multilingual embeddings computed on this machine (no AWS, free)."""
+    if "model" not in _model_cache:
+        from sentence_transformers import SentenceTransformer  # heavy import: only when this mode is used
+
+        _model_cache["model"] = SentenceTransformer(LOCAL_MODEL_ID)
+    vectors = _model_cache["model"].encode(list(texts), convert_to_numpy=True, show_progress_bar=False)
+    return np.asarray(vectors, dtype=np.float32)
 
 
 PAUSE_SECONDS = 1.0   # short pause between calls: new AWS accounts often have low request limits
@@ -84,10 +113,12 @@ def embed_texts(texts, mode="local", region=DEFAULT_REGION):
     """Return an array of shape (len(texts), dims) with unit-length rows."""
     if mode == "local":
         vectors = np.array([_local_embed(t) for t in texts], dtype=np.float32)
+    elif mode == "local-model":
+        vectors = _local_model_embed(texts)
     elif mode == "bedrock":
         vectors = _bedrock_embed(texts, region)
     else:
-        raise ValueError(f"unknown mode {mode!r}; use 'local' or 'bedrock'")
+        raise ValueError(f"unknown mode {mode!r}; use 'local', 'local-model' or 'bedrock'")
     norms = np.linalg.norm(vectors, axis=1, keepdims=True)
     norms[norms == 0] = 1.0  # an all-zero vector (no words) stays zero instead of dividing by 0
     return vectors / norms
