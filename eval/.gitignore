@@ -1,0 +1,4 @@
+# Generated embedding files: rebuild with build_embeddings.py
+data/embeddings/
+__pycache__/
+.pytest_cache/
