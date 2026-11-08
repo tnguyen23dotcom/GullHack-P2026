@@ -1,7 +1,7 @@
 """Gateway Lambda: chat via Bedrock, with a hook for egress checks.
 
 Request:  POST /chat  {"session_id": "...", "message": "..."}
-Response: 200 {"session_id": "...", "reply": "..."}
+Response: 200 {"session_id": "...", "reply": "...", "blocked": true/false}
 """
 
 import json
@@ -12,8 +12,10 @@ import uuid
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
-from checks.prompt import build_system_prompt
-from store import get_or_create_canary
+from checks.check_interface import SecurityContext
+from checks.layer_checks import ExactMatchCheck, FuzzyMatchCheck, NormalizedMatchCheck
+from checks.prompt import PROTECTED_POLICIES, build_system_prompt, get_static_secret_values
+from store import get_or_create_canary, write_alert
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
@@ -26,14 +28,52 @@ MAX_REPLY_TOKENS = 512
 # Created once per container, reused across invocations.
 bedrock = boto3.client("bedrock-runtime")
 
+# Egress checks (#3), cheapest first. Built once per container.
+# The semantic layer (Person C) is not here: its model is too big for this zip. Its results are
+# measured offline in eval/. Add it here only if the Lambda is moved to a container image.
+CHECKS = [ExactMatchCheck(), NormalizedMatchCheck(), FuzzyMatchCheck()]
+WITHHELD_REPLY = "This reply was withheld by the security gateway because it may contain protected information."
 
-def run_checks(reply: str, session_id: str) -> str:
-    """TODO(#3): run the exact, normalized and semantic checks here.
 
-    Should return the reply if it is clean, or withhold it if a leak is flagged.
-    Currently passes everything through unchanged.
+def run_checks(reply: str, session_id: str, canary: str):
+    """Run every check on the model's reply before the user sees it (#3).
+
+    Returns (reply_to_send, blocked_by): the original reply and None if it is clean, or
+    WITHHELD_REPLY and the name of the layer that flagged it. Fails closed: if a check
+    crashes, the reply is withheld. Never logs or stores the reply, the canary or the
+    matched secret (CheckResult.matched_fragment).
     """
-    return reply
+    context = SecurityContext(
+        session_id=session_id,
+        session_canary=canary,
+        static_secrets=get_static_secret_values(),
+        protected_chunks=list(PROTECTED_POLICIES),
+    )
+    for check in CHECKS:
+        try:
+            result = check.evaluate(reply, context)
+        except Exception as err:  # fail closed: a broken check must not let a leak through
+            logger.error("check %s failed: %s (session %s)", check.name, type(err).__name__, session_id)
+            _save_alert(session_id, f"Check {check.name} failed; reply withheld", {"layer": check.name})
+            return WITHHELD_REPLY, check.name
+        if result.is_violation:
+            logger.warning("leak blocked by %s (session %s)", result.layer_name, session_id)
+            _save_alert(session_id, result.reason or "Leak detected", {
+                "layer": result.layer_name,
+                "confidence": f"{result.confidence:.2f}",
+                "latency_ms": f"{result.latency_ms:.1f}",
+            })
+            return WITHHELD_REPLY, result.layer_name
+    return reply, None
+
+
+def _save_alert(session_id, reason, details):
+    """Write the alert to DynamoDB. The reply is withheld even if this write fails."""
+    try:
+        write_alert(session_id, reason, details)
+    except (ClientError, BotoCoreError) as err:
+        code = getattr(err, "response", {}).get("Error", {}).get("Code", type(err).__name__)
+        logger.error("alert write failed: %s (session %s)", code, session_id)
 
 
 def _response(status: int, body: dict) -> dict:
@@ -94,6 +134,6 @@ def lambda_handler(event, context):
     blocks = result["output"]["message"]["content"]
     reply = "".join(b.get("text", "") for b in blocks)
 
-    reply = run_checks(reply, session_id)
+    reply, blocked_by = run_checks(reply, session_id, canary)
 
-    return _response(200, {"session_id": session_id, "reply": reply})
+    return _response(200, {"session_id": session_id, "reply": reply, "blocked": blocked_by is not None})
