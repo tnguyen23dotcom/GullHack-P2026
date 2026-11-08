@@ -53,6 +53,7 @@ def test_summarize_counts_pipelines_layers_and_missing_layers():
     assert base["all_attacks"] == [1, 3] and layered["all_attacks"] == [2, 3]
     assert base["false_positives"] == [0, 2] and layered["false_positives"] == [1, 2]
     assert layered["missing_layers"] == ["normalized"]
+    assert s["pipelines"]["full"]["missing_layers"] == ["normalized", "fuzzy", "facts"]
     assert s["layers"]["semantic"]["caught"]["translation"] == 1
     assert s["layers"]["semantic"]["false_positives"] == 1
 
@@ -64,4 +65,4 @@ def test_markdown_states_simulated_and_missing_layers():
     md = ev.to_markdown(s, info)
     assert "simulated" in md
     assert "Not available yet" in md and "normalized" in md
-    assert "| verbatim | 1/1 (100%) | 1/1 (100%) |" in md
+    assert "| verbatim | 1/1 (100%) | 1/1 (100%) | 1/1 (100%) |" in md

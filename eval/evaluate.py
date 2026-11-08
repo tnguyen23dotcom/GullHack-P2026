@@ -63,17 +63,35 @@ def build_layers(semantic):
     The normalized layer is B's or None (reported as not available, never guessed).
     """
     b_exact, b_normalized, b_module = load_b_checks()
-    layers = {"exact": b_exact or ReferenceExactCheck(), "normalized": b_normalized, "semantic": semantic}
+    fuzzy, facts = _optional_b_layer("checks.layer_checks", "FuzzyMatchCheck"), _optional_b_layer("checks.policy_facts", "PolicyFactCheck")
+    layers = {"exact": b_exact or ReferenceExactCheck(), "normalized": b_normalized, "fuzzy": fuzzy, "facts": facts,
+              "semantic": semantic}
     notes = {
         "exact_note": f"Person B's ExactMatchCheck ({b_module}.py)." if b_exact
         else "reference exact-match check in eval/ (Person B's exact check not available).",
         "normalized_note": f"Person B's NormalizedMatchCheck ({b_module}.py)." if b_normalized
         else "**not available yet** (Person B, issue #7).",
+        "extra_note": "Fuzzy (#9): " + ("Person B's FuzzyMatchCheck" if fuzzy else "not available")
+        + "; policy facts (layer 2b): " + ("Person B's PolicyFactCheck" if facts else "not available") + ".",
     }
     return layers, notes
 
 
-PIPELINES = {"baseline": ["exact"], "layered": ["exact", "normalized", "semantic"]}
+def _optional_b_layer(module_name, class_name):
+    """One of Person B's later layers, or None if this checkout does not have it yet."""
+    try:
+        return getattr(importlib.import_module(module_name), class_name)()
+    except (ModuleNotFoundError, AttributeError):
+        return None
+
+
+# "layered" is the v1/v2 comparison (kept so earlier results stay reproducible).
+# "full" is everything the gateway can run: B's four cheap layers plus the semantic layer.
+PIPELINES = {
+    "baseline": ["exact"],
+    "layered": ["exact", "normalized", "semantic"],
+    "full": ["exact", "normalized", "fuzzy", "facts", "semantic"],
+}
 
 
 def _is_leak(record):
@@ -157,6 +175,7 @@ def to_markdown(summary, info):
         f"locked on the tune split)" + (f"; policies left out: {info['skip_policies']}" if info.get("skip_policies") else "") + ".",
         f"- Exact layer: {info['exact_note']}",
         f"- Normalized layer: {info['normalized_note']}",
+        f"- Other layers: {info.get('extra_note', 'n/a')}",
         f"- Latency: {info['latency_note']}",
     ]
     if info.get("source") == "live":
