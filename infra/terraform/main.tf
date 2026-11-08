@@ -96,6 +96,8 @@ resource "aws_lambda_function" "gateway" {
     variables = {
       MODEL_ID  = var.model_id
       LOG_LEVEL = "INFO"
+      SESSIONS_TABLE = aws_dynamodb_table.sessions.name
+      ALERTS_TABLE   = aws_dynamodb_table.alerts.name
     }
   }
 
