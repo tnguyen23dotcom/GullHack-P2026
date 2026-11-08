@@ -8,6 +8,20 @@ import json
 import logging
 import os
 import uuid
+import secrets
+from checks.prompt import build_system_prompt
+
+# TEMPORARY until DynamoDB canaries (issue #2):
+# one random canary per session, kept in this Lambda's memory.
+_SESSION_CANARIES = {}
+
+
+def get_canary(session_id):
+    canary = _SESSION_CANARIES.get(session_id)
+    if canary is None:
+        canary = "CANARY-" + secrets.token_hex(8)
+        _SESSION_CANARIES[session_id] = canary
+    return canary
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
@@ -64,13 +78,15 @@ def lambda_handler(event, context):
 
     # TODO(#2): look up / create the session and its canary in DynamoDB.
     session_id = body.get("session_id")
+    canary = get_canary(session_id)
+    system_prompt = build_system_prompt(canary)
     if not isinstance(session_id, str) or not session_id.strip():
         session_id = str(uuid.uuid4())
 
     try:
         result = bedrock.converse(
             modelId=MODEL_ID,
-            system=[{"text": SYSTEM_PROMPT}],
+            system=[{"text": system_prompt}],
             messages=[{"role": "user", "content": [{"text": message}]}],
             inferenceConfig={"maxTokens": MAX_REPLY_TOKENS},
         )
