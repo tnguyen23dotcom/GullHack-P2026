@@ -247,12 +247,42 @@ def load_live_replies(split):
     return replies, note
 
 
+def load_fresh_replies():
+    """The fresh held-out set (make_fresh_set.py) plus a reviewer's validity check of each item.
+
+    fresh_review.json says, for every item, whether it is a valid test case (a leak reply that really
+    carries the secret facts, or a normal reply that really leaks nothing). Invalid items, e.g. a
+    model that refused to translate, are left out and listed; they are not counted as misses.
+    """
+    raw = json.loads((DATA / "fresh_set.json").read_text(encoding="utf-8"))
+    review_path = DATA / "fresh_review.json"
+    if not review_path.exists():
+        raise SystemExit("Review the fresh set first: eval/data/fresh_review.json (id -> {\"valid\": true|false}).")
+    review = json.loads(review_path.read_text(encoding="utf-8"))
+    replies, dropped = [], []
+    for item in raw["items"]:
+        verdict = review.get(item["id"], {})
+        if not item.get("reply") or not isinstance(verdict.get("valid"), bool):
+            raise SystemExit(f"Missing reply or review for {item['id']}.") if item.get("reply") else dropped.append(item["id"])
+        if verdict.get("valid") is False:
+            dropped.append(item["id"])
+            continue
+        if item.get("reply"):
+            replies.append({**item, "split": "fresh"})
+    note = (f"- Replies: **fresh held-out set** built after all settings were locked: {len(replies)} valid items "
+            f"({sum(r['is_leak'] for r in replies)} leaks, {sum(not r['is_leak'] for r in replies)} normal). Translation and "
+            f"paraphrase leaks were written by {raw['model']}; verbatim, encoding and obfuscation leaks by code (known "
+            f"techniques); normal replies by the same model with Person B's prompt."
+            + (f" Left out as invalid: {', '.join(dropped)}." if dropped else ""))
+    return replies, note, raw["canary"]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--mode", choices=["local", "local-model", "bedrock"], default="local-model")
     parser.add_argument("--split", choices=["test", "tune"], default="test")
     parser.add_argument("--region", default=DEFAULT_REGION)
-    parser.add_argument("--replies", choices=["simulated", "live"], default="simulated",
+    parser.add_argument("--replies", choices=["simulated", "live", "fresh"], default="simulated",
                         help="simulated replies (default) or labelled live replies from live_collect.py")
     parser.add_argument("--settings", default="locked_settings.json",
                         help="locked settings file in eval/ (default: v1, locked_settings.json)")
@@ -268,7 +298,11 @@ def main():
             "Tune and lock this model on the tune split first."
         )
 
-    if args.replies == "live":
+    if args.replies == "fresh":
+        replies, replies_note, fresh_canary = load_fresh_replies()
+        context = make_context(fresh_canary, "fresh")
+        args.split = "fresh"
+    elif args.replies == "live":
         replies, replies_note = load_live_replies(args.split)
         context = live_context
     else:
@@ -304,12 +338,12 @@ def main():
     if fake:
         print("FAKE embedder: these numbers only check the script. Nothing was written.")
         return
-    if args.split == "tune":
+    if args.split == "tune":  # (the fresh set is never tuned on, so it is written)
         print("Tune split: data already used for tuning. Nothing was written; final numbers come from the test split.")
         return
     out_dir = EVAL / "results"
     out_dir.mkdir(exist_ok=True)
-    live = "_live" if args.replies == "live" else ""
+    live = "_live" if args.replies == "live" else ""  # fresh results are named results_fresh_...
     tag = "" if version == "v1" else f"_{version}"  # v1 keeps its original file names
     stem = f"results_{args.split}{live}{tag}_{model_name(args.mode).replace(':', '_')}"
     (out_dir / f"{stem}.md").write_text(markdown, encoding="utf-8")
