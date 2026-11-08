@@ -89,7 +89,7 @@ class ExactMatchCheck(BaseCheck):
                     layer_name=self.name,
                     confidence=1.0,
                     matched_fragment=target,
-                    reason=f"Verbatim leak detected: '{target[:12]}...'",
+                    reason=f"Verbatim leak of a protected value ({len(target)} characters)",  # never echo the secret into logs
                     latency_ms=duration_ms,
                     metadata={"match_type": "exact_verbatim"},
                 )
@@ -263,7 +263,10 @@ class FuzzyMatchCheck(BaseCheck):
 
     def evaluate(self, model_output: str, context: SecurityContext) -> CheckResult:
         start_time = time.perf_counter()
-        targets = context.exact_targets
+        # Keys and canary, plus the same policy phrases Layer 2 protects (e.g. a typo'd 'BlueFa1con991').
+        targets = list(context.exact_targets) + [
+            p for p in NormalizedMatchCheck.CORE_POLICY_ENTITIES if p not in context.exact_targets
+        ]
 
         words = model_output.split()
 
@@ -291,11 +294,7 @@ class FuzzyMatchCheck(BaseCheck):
                         matched_fragment=clean_word,
                         reason=f"Fuzzy edit-distance match ({ratio:.1%}) against target token",
                         latency_ms=duration_ms,
-                        metadata={
-                            "matched_target": target,
-                            "similarity_ratio": ratio,
-                            "candidate": clean_word,
-                        },
+                        metadata={"similarity_ratio": ratio, "target_length": target_len},  # no secret text
                     )
 
             # Check sliding substring windows for fused/unspaced tokens
@@ -315,11 +314,7 @@ class FuzzyMatchCheck(BaseCheck):
                             matched_fragment=window,
                             reason=f"Fuzzy substring match ({ratio:.1%}) against target token",
                             latency_ms=duration_ms,
-                            metadata={
-                                "matched_target": target,
-                                "similarity_ratio": ratio,
-                                "candidate_window": window,
-                            },
+                            metadata={"similarity_ratio": ratio, "target_length": target_len},  # no secret text
                         )
 
         duration_ms = (time.perf_counter() - start_time) * 1000.0
