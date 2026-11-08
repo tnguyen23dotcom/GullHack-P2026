@@ -98,6 +98,7 @@ resource "aws_lambda_function" "gateway" {
       LOG_LEVEL = "INFO"
       SESSIONS_TABLE = aws_dynamodb_table.sessions.name
       ALERTS_TABLE   = aws_dynamodb_table.alerts.name
+      EVENT_SOURCE   = var.project
     }
   }
 
@@ -112,7 +113,7 @@ resource "aws_apigatewayv2_api" "chat" {
 
   cors_configuration {
     allow_origins = var.allowed_origins
-    allow_methods = ["POST", "OPTIONS"]
+    allow_methods = ["POST", "OPTIONS", "GET"]
     allow_headers = ["content-type", "x-session-id"]
     max_age       = 300
   }

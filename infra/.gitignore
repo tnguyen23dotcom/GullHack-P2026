@@ -17,3 +17,5 @@ build/
 # Python
 __pycache__/
 *.pyc
+
+secrets.auto.tfvars
