@@ -27,7 +27,7 @@ def test_reference_exact_flags_canary_and_secret_but_not_lookalikes():
 
 
 def test_build_layers_uses_b_checks_when_available():
-    pytest.importorskip("layers_checks", reason="needs Person B's layers_checks.py")
+    pytest.importorskip("checks.layer_checks", reason="needs Person B's checks/layer_checks.py")
     layers, notes = ev.build_layers(semantic=None)
     assert layers["exact"].name == "layer_1_exact"
     assert layers["normalized"].name == "layer_2_normalized"
