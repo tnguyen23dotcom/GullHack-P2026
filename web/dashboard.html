@@ -80,9 +80,9 @@
 
 <script>
   // ---- CONFIG ----
-  // Issue #20: paste Person A's read endpoint below. Mock mode switches off by itself once the URL is real.
-  const ALERTS_URL = "https://REPLACE-ME.execute-api.us-east-1.amazonaws.com/alerts";
-  const USE_MOCK = ALERTS_URL.includes("REPLACE-ME");
+  // Issue #19: mock data. Issue #20: set USE_MOCK = false and paste Person A's read endpoint.
+  const USE_MOCK = true; // change this to true when Person A gives me the alerts endpoint
+  const ALERTS_URL = "https://REPLACE-ME.execute-api.us-east-1.amazonaws.com/alerts"; // Paste person A URL link
   const POLL_MS = 3000;
 
   // Assumed alert shape (agree on it with Person A):
@@ -169,30 +169,6 @@
     });
   }
 
-  // Accepts plain JSON or DynamoDB attribute format ({"S": "..."}), plus a few common field names.
-  function plain(v) {
-    if (v && typeof v === "object") {
-      if ("S" in v) return v.S;
-      if ("N" in v) return Number(v.N);
-      if ("BOOL" in v) return v.BOOL;
-    }
-    return v;
-  }
-  function normalize(raw) {
-    const r = {};
-    Object.keys(raw).forEach(function (k) { r[k] = plain(raw[k]); });
-    return {
-      id: r.id || r.alert_id || (r.session_id + "|" + (r.time || r.timestamp)),
-      time: r.time || r.timestamp || r.created_at,
-      session_id: r.session_id || r.sessionId || "unknown",
-      attack_type: r.attack_type || r.attackType,
-      layer: r.layer || r.detected_layer || r.detection_layer,
-      score: r.score == null ? null : Number(r.score),
-      blocked: r.blocked === true || r.blocked === "true" || r.action === "blocked"
-    };
-  }
-  let firstLoad = true;
-
   function setStatus(text) { document.getElementById("status").textContent = text; }
 
   async function load() {
@@ -201,9 +177,7 @@
       const res = await fetch(ALERTS_URL);
       if (!res.ok) throw new Error("HTTP " + res.status);
       const data = await res.json();
-      const list = Array.isArray(data) ? data : (data.alerts || data.Items || []);
-      alerts = list.map(normalize);
-      if (firstLoad) { alerts.forEach(function (a) { seen.add(a.id); }); firstLoad = false; }
+      alerts = Array.isArray(data) ? data : (data.alerts || []);
       setStatus("Live. Updated " + new Date().toLocaleTimeString());
       render();
     } catch (err) {
