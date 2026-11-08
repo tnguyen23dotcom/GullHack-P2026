@@ -15,7 +15,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from checks.check_interface import SecurityContext
 from checks.layer_checks import ExactMatchCheck, FuzzyMatchCheck, NormalizedMatchCheck
 from checks.prompt import PROTECTED_POLICIES, build_system_prompt, get_static_secret_values
-from store import get_or_create_canary, write_alert
+from store import get_or_create_canary, write_alert, is_session_blocked, list_alerts
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
@@ -83,8 +83,21 @@ def _response(status: int, body: dict) -> dict:
         "body": json.dumps(body),
     }
 
+def _alerts_endpoint(event):
+    """GET /alerts (optionally ?session_id=...) for Person D's dashboard."""
+    params = event.get("queryStringParameters") or {}
+    session_id = params.get("session_id")
+    try:
+        alerts = list_alerts(session_id)
+    except (ClientError, BotoCoreError) as err:
+        code = getattr(err, "response", {}).get("Error", {}).get("Code", type(err).__name__)
+        logger.error("list_alerts failed: %s", code)
+        return _response(503, {"error": "alert store unavailable"})
+    return _response(200, {"alerts": alerts})
 
 def lambda_handler(event, context):
+    if event.get("routeKey") == "GET /alerts":
+        return _alerts_endpoint(event)
     try:
         body = json.loads(event.get("body") or "{}")
     except (json.JSONDecodeError, TypeError):
@@ -113,7 +126,19 @@ def lambda_handler(event, context):
         code = getattr(err, "response", {}).get("Error", {}).get("Code", type(err).__name__)
         logger.error("session store failed: %s (session %s)", code, session_id)
         return _response(503, {"error": "session store unavailable"})
-
+    # Issue #4: refuse sessions that were blocked after a leak
+    try:
+        if is_session_blocked(session_id):
+            logger.warning("request from blocked session %s refused", session_id)
+            return _response(200, {
+                "session_id": session_id,
+                "reply": "This session has been blocked for security reasons. Please start a new session.",
+                "blocked": True,
+            })
+    except (ClientError, BotoCoreError) as err:
+        code = getattr(err, "response", {}).get("Error", {}).get("Code", type(err).__name__)
+        logger.error("blocked check failed: %s (session %s)", code, session_id)
+        return _response(503, {"error": "session store unavailable"})
     # 3. Build Person B's protected prompt with this session's canary.
     #    Never log the canary or the prompt.
     system_prompt = build_system_prompt(canary)
