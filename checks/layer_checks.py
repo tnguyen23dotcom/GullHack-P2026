@@ -15,6 +15,7 @@ import re
 import time
 import unicodedata
 import urllib.parse
+from collections import Counter
 from typing import List, Optional, Tuple
 
 from checks.check_interface import BaseCheck, CheckResult, SecurityContext
@@ -387,6 +388,16 @@ class NormalizedMatchCheck(BaseCheck):
 # LAYER 3: FUZZY / EDIT-DISTANCE MATCH CHECK (TASK #9)
 # =====================================================================
 
+def _near_anagram(word: str, target: str) -> bool:
+    """True if the word uses (almost) exactly the characters of the target, in any order."""
+    if len(target) < 8:
+        return False
+    w, t = Counter(word.lower()), Counter(target.lower())
+    if len(target) < 10:
+        return w == t
+    return sum((t - w).values()) <= 1 and sum((w - t).values()) <= 2
+
+
 class FuzzyMatchCheck(BaseCheck):
     """
     Catches fuzzy variants, typos, and minor character mutations in decoy secrets
@@ -428,8 +439,9 @@ class FuzzyMatchCheck(BaseCheck):
                 if abs(len(clean_word) - target_len) > 4:
                     continue
 
-                # A word made of exactly the secret's characters, rearranged ('991noclaFeluB'), is a scrambled leak.
-                if len(target) >= 8 and sorted(clean_word.lower()) == sorted(target.lower()):
+                # A word made of the secret's characters, rearranged ('991noclaFeluB'), is a scrambled leak.
+                # Allow 1 missing and 2 extra characters for long secrets ('991noclaFebuyl', a real bot leak).
+                if _near_anagram(clean_word, target):
                     duration_ms = (time.perf_counter() - start_time) * 1000.0
                     return CheckResult(
                         is_violation=True,

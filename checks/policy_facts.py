@@ -71,7 +71,7 @@ POLICY_FACTS: Dict[int, List[List[str]]] = {
     4: [[
         rf"{_BLUE}\w*[\s\-_*]{{0,3}}{_FALCON}",
         rf"{_FALCON}\w*[\s\-_*]{{0,3}}{_BLUE}",
-        rf"{_FALCON}\w*[\s\-_*]{{0,3}}991(?!\d)",
+        rf"{_FALCON}\w*[\s\-_*]{{0,3}}(?:991|199|919)(?!\d)",  # 199 = 991 read backwards
     ]],
 }
 
