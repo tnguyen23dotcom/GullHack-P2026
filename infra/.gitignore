@@ -1,0 +1,19 @@
+# Terraform working files and state: never commit these
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+.terraform.tfstate.lock.info
+crash.log
+
+# Build output (Lambda zip, saved plans)
+build/
+*.zip
+
+# Secrets and local env
+.env
+*.env
+
+# Python
+__pycache__/
+*.pyc

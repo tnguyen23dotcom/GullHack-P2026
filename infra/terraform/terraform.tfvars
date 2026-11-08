@@ -1,0 +1,1 @@
+   model_id = "us.anthropic.claude-haiku-5-5"

@@ -110,3 +110,31 @@ This is your own README on the `person-a-infra` branch. It lists your tasks, the
 - **Don't use real data.** Decoy secrets and fake data only. No real credentials, personal data or private information anywhere in the project.
 - **Don't attack anything except our own chatbot.** Attack prompts are harmless text-extraction tests against our own bot.
 - **Don't sit blocked in silence.** If a task depends on someone else's work that isn't ready, say so in the issue or the team chat.
+
+## Deploy (#1)
+
+**Prerequisites:** Terraform >= 1.6, AWS CLI v2 configured for `us-east-1` (`aws configure`), and Bedrock access to Amazon Nova 2 Lite (default; works on the AWS Free plan) and Titan Text Embeddings v2 for #12. Claude models need a Paid AWS plan; switch with `-var model_id=...`.
+
+```sh
+cd infra/terraform
+terraform init
+terraform plan -out=build/tfplan   # read the plan before applying
+terraform apply build/tfplan
+```
+
+**Test the gateway:**
+
+```sh
+curl -X POST "$(terraform output -raw chat_url)" \
+  -H "Content-Type: application/json" \
+  -d '{"session_id":"test-1","message":"Hello, who are you?"}'
+```
+
+The response is `{"session_id": "...", "reply": "..."}`. Logs: `aws logs tail "$(terraform output -raw log_group)" --follow`.
+
+**Tear down:** `terraform destroy`.
+
+| Path | Contents |
+| --- | --- |
+| `terraform/` | API Gateway (HTTP API, `POST /chat`), Lambda, least-privilege IAM role, log group |
+| `lambda/handler.py` | Gateway handler: Bedrock Converse call, with `run_checks` hook for #3 |
