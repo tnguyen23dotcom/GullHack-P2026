@@ -1,0 +1,14 @@
+{
+  "version": "v2",
+  "semantic_threshold": 0.6,
+  "semantic_skip_policies": [],
+  "embedding_mode": "local-model",
+  "embedding_model": "paraphrase-multilingual-MiniLM-L12-v2",
+  "chosen_on": "tune split only: 10 simulated leaks + 10 simulated normal replies + 20 labelled LIVE replies from the deployed bot (none leaked)",
+  "rule": "middle of the best threshold range with false positives <= 10% on the tune split (same rule as v1)",
+  "tune_best_range": [0.45, 0.725],
+  "tune_result": "verbatim 2/2, translation 2/2, paraphrase 1/2 caught; 0/30 harmless replies flagged",
+  "why_v2": "v1 (0.375) flagged 7/30 real test replies; real IT answers score up to ~0.5 against the policies, mostly policy 2 (code review approvals). Leaving out policy 5 was tested on the tune split and did not help, so no policy is skipped.",
+  "locked_on": "2026-11-07, before any v2 run on the test split",
+  "note": "v1 (locked_settings.json) and its results stay as they are. Report v1 and v2 side by side. Do not change v2 after seeing test-split results."
+}
