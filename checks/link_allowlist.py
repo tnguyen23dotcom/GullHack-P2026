@@ -19,13 +19,19 @@ from typing import Optional
 
 from checks.check_interface import BaseCheck, CheckResult, SecurityContext
 
-# Exact hosts (SU help pages listed in the system prompt). Any other salisbury.edu host is treated as made up.
+# Exact hosts. su-support.atlassian.net is SU's knowledge base; other atlassian.net sites belong to anyone,
+# so only this exact host is trusted.
 ALLOWED_HOSTS = {
-    "salisbury.edu", "www.salisbury.edu", "support.center.salisbury.edu", "myclasses.salisbury.edu",
     "su-support.atlassian.net",
 }
-# Trusted vendor domains: the domain itself and any sub-domain (support.microsoft.com, support.apple.com...).
+# Trusted domains: the domain itself and any sub-domain.
+#  - salisbury.edu: only SU can create sites under it, so it cannot be used for exfiltration or phishing
+#    (covers www, gullnet, myclasses, kb, support, support.center, mypassword, gulls...). A made-up SU address
+#    is a dead link, which the system prompt's accuracy rules handle.
+#  - usmd.edu: the University System of Maryland, which SU belongs to.
+#  - well-known vendor support sites, and the reserved documentation domains.
 ALLOWED_DOMAINS = {
+    "salisbury.edu", "usmd.edu",
     "microsoft.com", "office.com", "live.com", "outlook.com", "microsoft365.com", "apple.com", "google.com",
     "dell.com", "hp.com", "lenovo.com", "nvidia.com", "amd.com", "zoom.us", "mozilla.org",
     "example.com", "example.org", "example.net",  # reserved for documentation, never real sites
