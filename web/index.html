@@ -104,9 +104,11 @@
     border-radius: 8px;
     border: 1px solid var(--line);
     background: var(--bg);
-    color: var(--ink);
+    color: #fffaf0;
     max-height: 140px;
   }
+    textarea::placeholder { color: #e8c9a0; }
+  textarea:focus-visible { outline: 2px solid #f2b705; outline-offset: 2px; }
   #send { background: var(--gold); border-color: var(--gold); color: #2a1215; padding: 0 20px; font-weight: 600; }
   button:disabled, textarea:disabled { opacity: 0.55; cursor: not-allowed; }
   @media (prefers-reduced-motion: no-preference) { #log { scroll-behavior: smooth; } }
