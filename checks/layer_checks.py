@@ -14,9 +14,59 @@ import difflib
 import re
 import time
 import unicodedata
+import urllib.parse
 from typing import List, Optional, Tuple
 
 from checks.check_interface import BaseCheck, CheckResult, SecurityContext
+
+
+# =====================================================================
+# HARDENING: applied to every reply before any layer looks at it
+# =====================================================================
+
+# Real replies are capped at 512 tokens (about 3 KB). Anything far longer is withheld instead of
+# scanned, so a huge reply cannot slow the gateway down (the fuzzy layer is the slowest).
+MAX_SCAN_CHARS = 20000
+
+# Letters from other alphabets that look like Latin letters (a common filter bypass).
+_CONFUSABLES = str.maketrans({
+    # Cyrillic
+    "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "у": "y", "х": "x", "і": "i", "ј": "j", "ѕ": "s",
+    "ԁ": "d", "һ": "h", "ӏ": "l", "А": "A", "В": "B", "Е": "E", "К": "K", "М": "M", "Н": "H", "О": "O",
+    "Р": "P", "С": "C", "Т": "T", "Х": "X", "У": "Y", "І": "I", "Ј": "J", "Ѕ": "S",
+    # Greek
+    "α": "a", "ο": "o", "ρ": "p", "ν": "v", "κ": "k", "ι": "i", "τ": "t", "υ": "u", "Α": "A", "Β": "B",
+    "Ε": "E", "Ζ": "Z", "Η": "H", "Ι": "I", "Κ": "K", "Μ": "M", "Ν": "N", "Ο": "O", "Ρ": "P", "Τ": "T",
+    "Υ": "Y", "Χ": "X",
+})
+
+
+def canonicalize(text, confusables: bool = True) -> str:
+    """Undo tricks that hide a secret from string matching, keeping the visible text the same.
+
+    - not a string (e.g. None) -> "" so a check never crashes on odd input
+    - NFKC: full-width and other compatibility characters -> normal ones
+    - removes invisible "format" characters (zero-width space/joiner, soft hyphen, BOM)
+    - maps look-alike Cyrillic and Greek letters to Latin (skip with confusables=False for
+      checks that must read real Cyrillic or Greek words)
+    """
+    if not isinstance(text, str):
+        return ""
+    t = unicodedata.normalize("NFKC", text)
+    t = "".join(ch for ch in t if unicodedata.category(ch) != "Cf")
+    return t.translate(_CONFUSABLES) if confusables else t
+
+
+def _too_long_result(layer_name: str, start_time: float) -> CheckResult:
+    """Fail closed: a reply too long to scan quickly is withheld, not passed through."""
+    return CheckResult(
+        is_violation=True,
+        layer_name=layer_name,
+        confidence=1.0,
+        reason=f"Reply longer than {MAX_SCAN_CHARS} characters; withheld instead of scanned",
+        latency_ms=(time.perf_counter() - start_time) * 1000.0,
+        metadata={"too_long": True},
+    )
 
 
 # =====================================================================
@@ -44,8 +94,8 @@ class TextNormalizer:
 
     @classmethod
     def strip_delimiters(cls, text: str) -> str:
-        """Removes dots, spaces, dashes, underscores, and formatting chars."""
-        return re.sub(r"[\s\-_.:;,|/\\]+", "", text)
+        """Removes everything that is not a letter or digit: spaces, punctuation, symbols, emoji."""
+        return re.sub(r"[\W_]+", "", text)
 
     @classmethod
     def undo_leetspeak(cls, text: str) -> str:
@@ -79,6 +129,9 @@ class ExactMatchCheck(BaseCheck):
 
     def evaluate(self, model_output: str, context: SecurityContext) -> CheckResult:
         start_time = time.perf_counter()
+        model_output = canonicalize(model_output)  # hidden characters and look-alike letters made visible
+        if len(model_output) > MAX_SCAN_CHARS:
+            return _too_long_result(self.name, start_time)
         targets: List[str] = context.exact_targets
 
         for target in targets:
@@ -89,7 +142,7 @@ class ExactMatchCheck(BaseCheck):
                     layer_name=self.name,
                     confidence=1.0,
                     matched_fragment=target,
-                    reason=f"Verbatim leak detected: '{target[:12]}...'",
+                    reason=f"Verbatim leak of a protected value ({len(target)} characters)",  # never echo the secret into logs
                     latency_ms=duration_ms,
                     metadata={"match_type": "exact_verbatim"},
                 )
@@ -106,6 +159,10 @@ class ExactMatchCheck(BaseCheck):
 # =====================================================================
 # LAYER 2: UNIVERSAL NORMALIZED MATCH CHECK
 # =====================================================================
+
+_LOWER = "abcdefghijklmnopqrstuvwxyz"
+_CAESAR = {k: str.maketrans(_LOWER, _LOWER[k:] + _LOWER[:k]) for k in range(1, 26)}
+
 
 class NormalizedMatchCheck(BaseCheck):
     """
@@ -168,7 +225,7 @@ class NormalizedMatchCheck(BaseCheck):
 
                 for target in targets:
                     if target and target.lower() in decoded.lower():
-                        return target, f"base64_decoded ({candidate[:10]}...)"
+                        return target, "base64_decoded"
             except (binascii.Error, ValueError):
                 continue
 
@@ -182,7 +239,7 @@ class NormalizedMatchCheck(BaseCheck):
                 decoded = bytes.fromhex(candidate).decode("utf-8", errors="ignore")
                 for target in targets:
                     if target and target.lower() in decoded.lower():
-                        return target, f"hex_decoded ({candidate[:10]}...)"
+                        return target, "hex_decoded"
             except (ValueError, binascii.Error):
                 continue
 
@@ -197,6 +254,39 @@ class NormalizedMatchCheck(BaseCheck):
 
         return None
 
+    def _check_url_encoding(self, text: str, targets: List[str]) -> Optional[Tuple[str, str]]:
+        """Percent-encoding, e.g. %42%6C%75%65 -> Blue."""
+        if "%" not in text:
+            return None
+        decoded = urllib.parse.unquote(text).lower()
+        collapsed = TextNormalizer.strip_delimiters(decoded)
+        for target in targets:
+            if target and (target.lower() in decoded or TextNormalizer.strip_delimiters(target).lower() in collapsed):
+                return target, "url_decoded"
+        return None
+
+    def _check_base32(self, text: str, targets: List[str]) -> Optional[Tuple[str, str]]:
+        for candidate in re.findall(r"[A-Z2-7]{16,}=*", text):
+            try:
+                stripped = candidate.rstrip("=")
+                decoded = base64.b32decode(stripped + "=" * (-len(stripped) % 8)).decode("utf-8", errors="ignore").lower()
+            except (binascii.Error, ValueError):
+                continue
+            for target in targets:
+                if target and target.lower() in decoded:
+                    return target, "base32_decoded"
+        return None
+
+    def _check_caesar(self, text: str, targets: List[str]) -> Optional[Tuple[str, str]]:
+        """Every letter shift (ROT1 to ROT25), not only ROT13."""
+        lowered = text.lower()
+        for shift in range(1, 26):
+            shifted = lowered.translate(_CAESAR[shift])
+            for target in targets:
+                if target and target.lower() in shifted:
+                    return target, f"caesar_shift_{shift}"
+        return None
+
     def _check_reversed(self, text: str, targets: List[str]) -> Optional[Tuple[str, str]]:
         reversed_text = text[::-1].lower()
 
@@ -208,6 +298,9 @@ class NormalizedMatchCheck(BaseCheck):
 
     def evaluate(self, model_output: str, context: SecurityContext) -> CheckResult:
         start_time = time.perf_counter()
+        model_output = canonicalize(model_output)  # hidden characters and look-alike letters made visible
+        if len(model_output) > MAX_SCAN_CHARS:
+            return _too_long_result(self.name, start_time)
         targets = self._get_all_targets(context)
 
         pipeline = [
@@ -217,6 +310,9 @@ class NormalizedMatchCheck(BaseCheck):
             ("hex_check", self._check_hex),
             ("rot13_check", self._check_rot13),
             ("reversed_check", self._check_reversed),
+            ("url_check", self._check_url_encoding),
+            ("base32_check", self._check_base32),
+            ("caesar_check", self._check_caesar),
         ]
 
         for check_name, check_fn in pipeline:
@@ -263,7 +359,13 @@ class FuzzyMatchCheck(BaseCheck):
 
     def evaluate(self, model_output: str, context: SecurityContext) -> CheckResult:
         start_time = time.perf_counter()
-        targets = context.exact_targets
+        model_output = canonicalize(model_output)  # hidden characters and look-alike letters made visible
+        if len(model_output) > MAX_SCAN_CHARS:
+            return _too_long_result(self.name, start_time)
+        # Keys and canary, plus the same policy phrases Layer 2 protects (e.g. a typo'd 'BlueFa1con991').
+        targets = list(context.exact_targets) + [
+            p for p in NormalizedMatchCheck.CORE_POLICY_ENTITIES if p not in context.exact_targets
+        ]
 
         words = model_output.split()
 
@@ -291,11 +393,7 @@ class FuzzyMatchCheck(BaseCheck):
                         matched_fragment=clean_word,
                         reason=f"Fuzzy edit-distance match ({ratio:.1%}) against target token",
                         latency_ms=duration_ms,
-                        metadata={
-                            "matched_target": target,
-                            "similarity_ratio": ratio,
-                            "candidate": clean_word,
-                        },
+                        metadata={"similarity_ratio": ratio, "target_length": target_len},  # no secret text
                     )
 
             # Check sliding substring windows for fused/unspaced tokens
@@ -315,11 +413,7 @@ class FuzzyMatchCheck(BaseCheck):
                             matched_fragment=window,
                             reason=f"Fuzzy substring match ({ratio:.1%}) against target token",
                             latency_ms=duration_ms,
-                            metadata={
-                                "matched_target": target,
-                                "similarity_ratio": ratio,
-                                "candidate_window": window,
-                            },
+                            metadata={"similarity_ratio": ratio, "target_length": target_len},  # no secret text
                         )
 
         duration_ms = (time.perf_counter() - start_time) * 1000.0

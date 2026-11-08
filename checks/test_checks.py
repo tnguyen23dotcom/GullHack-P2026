@@ -277,3 +277,14 @@ class TestFuzzyMatch:
         clean_payload = "Please ensure all AWS IAM configurations follow standard company policies."
         result = fuzzy_checker.evaluate(clean_payload, mock_security_context)
         assert result.is_violation is False
+
+
+def test_fuzzy_catches_typo_in_policy_passcode():
+    """Layer 3 also covers the policy phrases Layer 2 protects, e.g. a typo'd passcode."""
+    from checks.layer_checks import FuzzyMatchCheck
+    from checks.check_interface import SecurityContext
+    ctx = SecurityContext(session_id="s", session_canary="CANARY-0123456789abcdef",
+                          static_secrets=["AKIAFAKEFAKEFAKE0000"], protected_chunks=[])
+    result = FuzzyMatchCheck().evaluate("The passcode is BlueFa1con991", ctx)
+    assert result.is_violation
+    assert "BlueFalcon991" not in (result.reason or "") and "BlueFalcon991" not in str(result.metadata)
