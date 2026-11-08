@@ -18,6 +18,7 @@ import urllib.parse
 from typing import List, Optional, Tuple
 
 from checks.check_interface import BaseCheck, CheckResult, SecurityContext
+from checks.decoders import decoded_views
 
 
 # =====================================================================
@@ -97,10 +98,19 @@ class TextNormalizer:
         """Removes everything that is not a letter or digit: spaces, punctuation, symbols, emoji."""
         return re.sub(r"[\W_]+", "", text)
 
+    # Letters that leet writers swap freely (1/l/i/!/|) folded to one letter, used on BOTH sides,
+    # so 'B1u3F@lc0n99!' and 'BlueFalcon991' both become 'biuefaicon99i'.
+    AMBIGUOUS_FOLD = str.maketrans({"l": "i", "|": "i"})
+
     @classmethod
     def undo_leetspeak(cls, text: str) -> str:
         """Translates 3->e, 4->a, 0->o, 1->i, @->a, $->s across case."""
         return text.lower().translate(cls.LEET_TABLE)
+
+    @classmethod
+    def fold_ambiguous(cls, text: str) -> str:
+        """Stronger leet fold: undo leetspeak, then merge look-alike letters and drop symbols."""
+        return cls.strip_delimiters(cls.undo_leetspeak(text).translate(cls.AMBIGUOUS_FOLD))
 
     @classmethod
     def normalize_homoglyphs(cls, text: str) -> str:
@@ -206,12 +216,28 @@ class NormalizedMatchCheck(BaseCheck):
         unleeted_text = TextNormalizer.undo_leetspeak(text)
         collapsed_unleeted = TextNormalizer.strip_delimiters(unleeted_text)
 
+        folded_text = TextNormalizer.fold_ambiguous(text)
+
         for target in targets:
             unleeted_target = TextNormalizer.undo_leetspeak(target)
             clean_target = TextNormalizer.strip_delimiters(unleeted_target)
             if clean_target and len(clean_target) >= 4 and clean_target in collapsed_unleeted:
                 return target, "leetspeak_decoded"
+            # Heavy leet (B1u3F@lc0n99!): compare with look-alike letters merged on both sides.
+            folded_target = TextNormalizer.fold_ambiguous(target)
+            if len(folded_target) >= 8 and folded_target in folded_text:
+                return target, "leetspeak_folded"
 
+        return None
+
+    def _check_decoded_views(self, text: str, targets: List[str]) -> Optional[Tuple[str, str]]:
+        """Morse, NATO, binary, octal, HTML, \\u escapes, ROT47, nested base64, acrostics, vertical text,
+        pig latin, upside-down text, split parts... (see checks/decoders.py). Each decoded view is
+        searched for a whole secret, after removing symbols and undoing leetspeak."""
+        for view_name, view in decoded_views(text):
+            hit = self._check_delimiter_and_dots(view, targets) or self._check_leetspeak(view, targets)
+            if hit:
+                return hit[0], f"decoded_{view_name}"
         return None
       
     def _check_base64(self, text: str, targets: List[str]) -> Optional[Tuple[str, str]]:
@@ -313,6 +339,7 @@ class NormalizedMatchCheck(BaseCheck):
             ("url_check", self._check_url_encoding),
             ("base32_check", self._check_base32),
             ("caesar_check", self._check_caesar),
+            ("decoded_views_check", self._check_decoded_views),
         ]
 
         for check_name, check_fn in pipeline:
