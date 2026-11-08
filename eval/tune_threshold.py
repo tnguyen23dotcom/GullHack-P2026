@@ -83,26 +83,40 @@ def main():
     parser.add_argument("--mode", choices=["local", "local-model", "bedrock"], default="local")
     parser.add_argument("--region", default=DEFAULT_REGION)
     parser.add_argument("--max-fp", type=float, default=0.10, help="largest false-positive rate you accept (default 0.10)")
+    parser.add_argument("--live", action="store_true",
+                        help="also use the labelled LIVE tune replies (live_replies_tune.json + live_labels_tune.json)")
+    parser.add_argument("--skip-policy", type=int, action="append", default=[],
+                        help="1-based policy number to leave out of the comparison (repeatable), e.g. --skip-policy 5")
     args = parser.parse_args()
 
     replies = [r for r in json.loads((DATA / "simulated_replies.json").read_text(encoding="utf-8")) if r["split"] == "tune"]
-    check = SemanticCheck(threshold=1.0, mode=args.mode, region=args.region)  # threshold unused: we read the raw score
+    for r in replies:
+        r["source"] = "sim"
+    if args.live:
+        from evaluate import load_live_replies  # imported here so the plain sweep needs no live files
+        live, _ = load_live_replies("tune")
+        replies += [{**r, "source": "live"} for r in live]
+    check = SemanticCheck(threshold=1.0, mode=args.mode, region=args.region, skip_policies=args.skip_policy)
     context = tune_context()
     print(f"embedding model: {model_name(args.mode)}   protected policies: {len(context.protected_chunks)}   "
-          f"tune replies: {len(replies)} (test split NOT used)")
+          f"skipped: {args.skip_policy or 'none'}   tune replies: {len(replies)} "
+          f"({'simulated + live' if args.live else 'simulated'}; test split NOT used)")
     if args.mode == "local":
         print("WARNING: FAKE embedder. It matches shared words, not meaning. Pipeline test only.")
 
     scores_by_type = {t: [] for t in ATTACK_TYPES}
     normal_scores, per_reply = [], []
     for item in replies:
-        score = check.evaluate(item["reply"], context).metadata["score"]
-        per_reply.append((item["id"], score))
-        (normal_scores if item["type"] == "normal" else scores_by_type[item["type"]]).append(score)
+        meta = check.evaluate(item["reply"], context).metadata
+        score = meta["score"]
+        policy = None if meta.get("chunk_index") is None else meta["chunk_index"] + 1
+        leak = item.get("is_leak", item["type"] != "normal")
+        per_reply.append((item["id"], item["source"], leak, score, policy))
+        (scores_by_type[item["type"]] if leak else normal_scores).append(score)
 
-    print("\nscore per reply (tune split):")
-    for reply_id, score in per_reply:
-        print(f"  {reply_id:<9} {score:.3f}")
+    print("\nscore per reply (tune split), highest first; 'policy' = which protected policy it matched best:")
+    for reply_id, source, leak, score, policy in sorted(per_reply, key=lambda x: -x[3]):
+        print(f"  {reply_id:<9} {source:<4} {'LEAK  ' if leak else 'normal'} {score:.3f}  policy {policy}")
 
     print("\nbest-similarity score per group (min / mean / max):")
     for name, scores in list(scores_by_type.items()) + [("normal", normal_scores)]:
@@ -128,7 +142,8 @@ def main():
     print(
         f"RECOMMENDED threshold (middle of the best range, tune split only): {best['threshold']:.3f}  "
         f"[focus-type detection {_focus(best, FOCUS_TYPES):.0%}, false positives {best['false_positive']:.0%}, "
-        f"model {model_name(args.mode)}]"
+        f"model {model_name(args.mode)}, skipped policies {args.skip_policy or 'none'}, "
+        f"{'with' if args.live else 'without'} live replies]"
     )
     print("Confirm it on the test split later (issues #14 and #15). Do not change it after seeing test results.")
 

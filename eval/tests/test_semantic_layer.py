@@ -75,6 +75,15 @@ def test_policy_vectors_are_embedded_once_and_cached(monkeypatch):
     assert second.metadata["chunk_cache_hit"] is True
 
 
+def test_skipped_policy_is_never_matched_and_numbers_stay_stable():
+    check = SemanticCheck(threshold=0.8, mode="local", skip_policies=[1])
+    copied_first = check.evaluate(POLICIES[0], context())
+    assert not copied_first.is_violation  # policy 1 is skipped, so copying it is not flagged
+    copied_second = check.evaluate(POLICIES[1], context())
+    assert copied_second.is_violation and copied_second.metadata["chunk_index"] == 1 and "#2" in copied_second.reason
+    assert copied_second.metadata["skip_policies"] == [1]
+
+
 def test_result_does_not_copy_policy_text_into_metadata():
     result = SemanticCheck(threshold=0.8, mode="local").evaluate(POLICIES[0], context())
     assert not any(p in str(result.metadata) for p in POLICIES)
