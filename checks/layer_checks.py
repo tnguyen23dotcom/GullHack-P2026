@@ -66,7 +66,6 @@ class TextNormalizer:
         cleaned = cls.undo_leetspeak(cleaned)
         cleaned = re.sub(r"(?<=\b[A-Za-z])[.\-_](?=[A-Za-z]\b)", "", cleaned)
         return cleaned
-
 # =====================================================================
 # LAYER 1: EXACT MATCH CHECK
 # =====================================================================
@@ -146,16 +145,17 @@ class NormalizedMatchCheck(BaseCheck):
         return None
 
     def _check_leetspeak(self, text: str, targets: List[str]) -> Optional[Tuple[str, str]]:
-        unleeted_text = TextNormalizer.undo_leetspeak(text).lower()
+        unleeted_text = TextNormalizer.undo_leetspeak(text)
         collapsed_unleeted = TextNormalizer.strip_delimiters(unleeted_text)
 
         for target in targets:
-            clean_target = TextNormalizer.strip_delimiters(target).lower()
-            if clean_target and clean_target in collapsed_unleeted:
+            unleeted_target = TextNormalizer.undo_leetspeak(target)
+            clean_target = TextNormalizer.strip_delimiters(unleeted_target)
+            if clean_target and len(clean_target) >= 4 and clean_target in collapsed_unleeted:
                 return target, "leetspeak_decoded"
 
         return None
-
+      
     def _check_base64(self, text: str, targets: List[str]) -> Optional[Tuple[str, str]]:
         candidates = self._b64_pattern.findall(text)
 
