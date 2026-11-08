@@ -96,7 +96,8 @@ def run_layers(replies, layers, context):
             if check is None:
                 continue
             r = check.evaluate(item["reply"], ctx)
-            results[name] = {"flagged": bool(r.is_violation), "ms": float(r.latency_ms), "score": r.metadata.get("score")}
+            results[name] = {"flagged": bool(r.is_violation), "ms": float(r.latency_ms), "score": r.metadata.get("score"),
+                             "policy": None if r.metadata.get("chunk_index") is None else r.metadata["chunk_index"] + 1}
         records.append({"id": item["id"], "type": item["type"], "is_leak": _is_leak(item), "layers": results})
     return records
 
@@ -152,7 +153,8 @@ def to_markdown(summary, info):
         info.get("replies_note") or (
             f"- Replies: **simulated** ({summary['counts']['attacks']} attacks, {summary['counts']['normal']} normal), "
             "not a live chat model."),
-        f"- Semantic layer: `{info['model']}`, threshold {info['threshold']} (locked on the tune split).",
+        f"- Semantic layer: `{info['model']}`, threshold {info['threshold']} (settings {info.get('version', 'v1')}, "
+        f"locked on the tune split)" + (f"; policies left out: {info['skip_policies']}" if info.get("skip_policies") else "") + ".",
         f"- Exact layer: {info['exact_note']}",
         f"- Normalized layer: {info['normalized_note']}",
         f"- Latency: {info['latency_note']}",
@@ -233,9 +235,13 @@ def main():
     parser.add_argument("--region", default=DEFAULT_REGION)
     parser.add_argument("--replies", choices=["simulated", "live"], default="simulated",
                         help="simulated replies (default) or labelled live replies from live_collect.py")
+    parser.add_argument("--settings", default="locked_settings.json",
+                        help="locked settings file in eval/ (default: v1, locked_settings.json)")
     args = parser.parse_args()
 
-    locked = json.loads((EVAL / "locked_settings.json").read_text(encoding="utf-8"))
+    locked = json.loads((EVAL / args.settings).read_text(encoding="utf-8"))
+    version = locked.get("version", "v1")
+    skip = locked.get("semantic_skip_policies", [])
     fake = args.mode == "local"
     if not fake and model_name(args.mode) != locked["embedding_model"]:
         raise SystemExit(
@@ -250,7 +256,8 @@ def main():
         replies = [r for r in json.loads((DATA / "simulated_replies.json").read_text(encoding="utf-8")) if r["split"] == args.split]
         replies_note = None
         context = make_context(SIM_CANARY, f"eval-{args.split}")
-    semantic = SemanticCheck(threshold=locked["semantic_threshold"], mode=args.mode, region=args.region)
+    semantic = SemanticCheck(threshold=locked["semantic_threshold"], mode=args.mode, region=args.region,
+                             skip_policies=skip)
     layers, layer_notes = build_layers(semantic)
     available = [n for n, c in layers.items() if c is not None]
 
@@ -266,6 +273,8 @@ def main():
         "split": args.split,
         "model": model_name(args.mode),
         "threshold": locked["semantic_threshold"],
+        "version": version,
+        "skip_policies": skip,
         **layer_notes,
         "latency_note": f"measured on this machine's CPU, per reply, after a warm-up call; the semantic cold start "
                         f"(model load and policy embedding) took {cold:.0f} ms and is not in the per-reply numbers.",
@@ -282,7 +291,8 @@ def main():
     out_dir = EVAL / "results"
     out_dir.mkdir(exist_ok=True)
     live = "_live" if args.replies == "live" else ""
-    stem = f"results_{args.split}{live}_{model_name(args.mode).replace(':', '_')}"
+    tag = "" if version == "v1" else f"_{version}"  # v1 keeps its original file names
+    stem = f"results_{args.split}{live}{tag}_{model_name(args.mode).replace(':', '_')}"
     (out_dir / f"{stem}.md").write_text(markdown, encoding="utf-8")
     (out_dir / f"{stem}.json").write_text(json.dumps({"info": info, "summary": summary, "records": records}, indent=2) + "\n", encoding="utf-8")
     print(f"wrote eval/results/{stem}.md and .json")

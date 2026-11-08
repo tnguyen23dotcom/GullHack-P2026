@@ -27,11 +27,14 @@ from semantic_check import split_reply
 
 
 class SemanticCheck(BaseCheck):
-    def __init__(self, threshold, mode="local-model", region=DEFAULT_REGION, name="layer_4_semantic"):
+    def __init__(self, threshold, mode="local-model", region=DEFAULT_REGION, name="layer_4_semantic", skip_policies=()):
+        """skip_policies: 1-based numbers of protected policies NOT to compare against
+        (for example 5 = the "never reveal" rule, which every refusal resembles)."""
         super().__init__(name=name)
         self.threshold = threshold
         self.mode = mode
         self.region = region
+        self.skip_policies = tuple(sorted(set(skip_policies)))
         self._chunk_cache = {}  # tuple of policy texts -> their vectors (policies rarely change)
 
     def _chunk_vectors(self, chunks):
@@ -44,9 +47,14 @@ class SemanticCheck(BaseCheck):
 
     def evaluate(self, model_output, context):
         start = time.perf_counter()
-        chunks = [c for c in context.protected_chunks if c and c.strip()]
+        # Keep each policy's original 1-based number so chunk_index always names the same policy.
+        numbered = [(n, c) for n, c in enumerate(context.protected_chunks, start=1)
+                    if c and c.strip() and n not in self.skip_policies]
+        numbers = [n for n, _ in numbered]
+        chunks = [c for _, c in numbered]
         sentences = split_reply(model_output or "")
-        base_meta = {"model": model_name(self.mode), "threshold": self.threshold, "sentences": len(sentences)}
+        base_meta = {"model": model_name(self.mode), "threshold": self.threshold, "sentences": len(sentences),
+                     "skip_policies": list(self.skip_policies)}
 
         # Nothing to compare: no protected policies, or a reply with no real sentences.
         if not chunks or not sentences:
@@ -71,11 +79,12 @@ class SemanticCheck(BaseCheck):
             confidence=min(max(score, 0.0), 1.0),
             matched_fragment=sentences[row] if flagged else None,
             reason=(
-                f"Reply sentence is semantically similar to protected policy #{col + 1} "
+                f"Reply sentence is semantically similar to protected policy #{numbers[col]} "
                 f"(cosine {score:.3f} >= threshold {self.threshold:.3f})."
                 if flagged
                 else None
             ),
             latency_ms=(time.perf_counter() - start) * 1000.0,
-            metadata={**base_meta, "score": score, "chunk_index": int(col), "chunk_cache_hit": cache_hit},
+            # chunk_index: 0-based position in context.protected_chunks (skipped policies keep their numbers).
+            metadata={**base_meta, "score": score, "chunk_index": numbers[col] - 1, "chunk_cache_hit": cache_hit},
         )
