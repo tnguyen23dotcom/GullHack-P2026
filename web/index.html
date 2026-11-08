@@ -146,8 +146,6 @@
 </div>
 
 <script>
-  // ---- CONFIG: Person A gives you this URL (issue A1). Change only this line. ---- // change line 149 with person A URL
-  //const API_URL = "https://REPLACE-ME.execute-api.us-east-1.amazonaws.com/chat";
   const API_URL = "https://94v13m7mj1.execute-api.us-east-1.amazonaws.com/chat";
 
   // Assumed contract (agree on it with Person A):
@@ -161,12 +159,15 @@
   const form = document.getElementById("form");
   const sidEl = document.getElementById("sid");
   let sessionId = "";
+  let sessionNumber = 0;
   let busy = false;
 
   function newSession() {
-    sessionId = crypto.randomUUID ? crypto.randomUUID()
-      : "s-" + Date.now() + "-" + Math.random().toString(16).slice(2);
-    sidEl.textContent = sessionId.slice(0, 8);
+    sessionNumber++;
+    const rand = crypto.randomUUID ? crypto.randomUUID()
+      : Date.now() + "-" + Math.random().toString(16).slice(2);
+    sessionId = sessionNumber + "-" + rand;
+    sidEl.textContent = "#" + sessionNumber;
     sidEl.title = sessionId;
     log.replaceChildren();
     const p = document.createElement("p");
