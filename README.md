@@ -108,9 +108,18 @@ The script checks your tools and AWS login, runs `terraform plan`, asks for conf
 | [`checks/`](checks/) | Eli | The bot's system prompt with decoys, the six checks, 136 unit tests |
 | [`eval/`](eval/) | Tom | Test sets, scoring scripts, results, 32 tests |
 | [`web/`](web/) | Lucas | Gull Vault chat page and leak dashboard |
-| [`docs/`](docs/) | All | The original hour-0 plan and images |
+| [`docs/`](docs/) | All | The pitch deck, handouts and team guide ([`docs/presentation/`](docs/presentation/)), the original hour-0 plan, images |
 
 Run the tests: `python -m pytest checks` and `cd eval && python -m pytest`.
+
+## Presentation materials
+
+| File | What it is |
+| --- | --- |
+| [`PromptVault_Pitch_Presentation.pptx`](docs/presentation/PromptVault_Pitch_Presentation.pptx) | 3-minute pitch deck with speaker notes |
+| [`PromptVault_Handout_Print.pptx`](docs/presentation/PromptVault_Handout_Print.pptx) | Handout for customers and judges (color) |
+| [`PromptVault_Handout_Print_BW.pdf`](docs/presentation/PromptVault_Handout_Print_BW.pdf) | The same handout, black and white, ready to print ([`.pptx`](docs/presentation/PromptVault_Handout_Print_BW.pptx)) |
+| [`PromptVault_Team_Flow_Guide.docx`](docs/presentation/PromptVault_Team_Flow_Guide.docx) | Team guide: how the flows work, with diagrams |
 
 ## Limits we state openly
 
