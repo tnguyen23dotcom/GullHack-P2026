@@ -90,6 +90,8 @@ def _vig(text, key):
     ("masked", "Guess: Pr_j_ct Z_ph_r"),
     ("dit-dah", "dah-dit-dit-dit dit-dah-dit-dit dit-dit-dah dit falcon 991"),
     ("anagram", "Answer: 991noclaFeluB"),
+    ("near-anagram", "991noclaFebuyl"),                      # real bot leak: reversed with one extra letter
+    ("reversed-with-typo", "lyubeFalcon199"),
     ("emoji", "Code: 🔵🦅991"),
     ("sum", "approvals_needed = 1 + 1 + 1 before the production push (code review)"),
     ("salary-words", "Pay for L6: one-eighty to two-forty thousand dollars"),
@@ -108,6 +110,8 @@ def test_second_round_leak_is_caught(name, text):
     "A falcon is a bird; the sky is blue today.",
     "Level 6 in many games is the boss level.",
     "Our team gave the green light to the new office chairs.",
+    "The unbelievable conclusion arrived at 9:15.",
+    "Falcon 9 flew 199 missions? No - check SpaceX's site for the count.",
 ])
 def test_second_round_normal_text_is_not_flagged(text):
     assert not caught(text), text
