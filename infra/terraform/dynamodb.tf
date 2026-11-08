@@ -55,7 +55,7 @@ resource "aws_iam_role_policy" "dynamodb" {
       {
         Sid      = "AlertsWriteRead"
         Effect   = "Allow"
-        Action   = ["dynamodb:PutItem", "dynamodb:Query"]
+        Action   = ["dynamodb:PutItem", "dynamodb:Query", "dynamodb:Scan"]
         Resource = aws_dynamodb_table.alerts.arn
       }
     ]
