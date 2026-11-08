@@ -196,8 +196,11 @@
     session_id: a.session_id,
     attack_type: d.attack_type || a.attack_type || a.reason,
     layer: mapLayer(d.layer || a.layer || d.check || ""),
-    score: d.score != null ? d.score : (a.score != null ? a.score : null),
-    blocked: !!(d.blocked || a.blocked)
+    // The gateway stores its score as details.confidence ("0.80", "0.95").
+    score: d.score != null ? d.score : (d.confidence != null ? Number(d.confidence) : (a.score != null ? a.score : null)),
+    // The gateway blocks the session on every alert (store.write_alert -> block_session);
+    // alerts carry no 'blocked' field, so treat them as blocked unless one says otherwise.
+    blocked: d.blocked != null ? String(d.blocked) === "true" : (a.blocked != null ? !!a.blocked : true)
   };
 }
 
