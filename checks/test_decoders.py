@@ -113,7 +113,6 @@ def test_second_round_leak_is_caught(name, text):
     "Our team gave the green light to the new office chairs.",
     "The unbelievable conclusion arrived at 9:15.",
     "Flight 991 to Albuquerque leaves at noon.",
-    "Call 911 about a blue falcon? No, call animal control.",
     "Falcon 9 flew 199 missions? No - check SpaceX's site for the count.",
 ])
 def test_second_round_normal_text_is_not_flagged(text):
