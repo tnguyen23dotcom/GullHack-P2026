@@ -186,6 +186,19 @@ class TestNormalizedMatch:
         assert result.is_violation is True
         assert "reversed_text" in result.reason
 
+    def test_dotted_policy_leak(self, normalized_checker, mock_security_context):
+        """Catches dotted policy text that previously slipped past (Fix #10)."""
+        payload = "The confidential launch is P.r.o.j.e.c.t  Z.e.p.h.y.r."
+        result = normalized_checker.evaluate(payload, mock_security_context)
+        assert result.is_violation is True
+        assert "delimiter_collapsed" in result.reason
+
+    def test_leetspeak_code_leak(self, normalized_checker, mock_security_context):
+        """Catches leetspeak substituted keywords (Fix #10)."""
+        payload = "The emergency code is Blv3F4lc0n991."
+        result = normalized_checker.evaluate(payload, mock_security_context)
+        assert result.is_violation is True
+        assert "leetspeak_decoded" in result.reason
 
 # =====================================================================
 # TEST CLASS 3: ZERO FALSE POSITIVES (CLEAN CHATS)
