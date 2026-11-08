@@ -395,7 +395,9 @@ def _near_anagram(word: str, target: str) -> bool:
     w, t = Counter(word.lower()), Counter(target.lower())
     if len(target) < 10:
         return w == t
-    return sum((t - w).values()) <= 1 and sum((w - t).values()) <= 2
+    # Up to about 1 in 6 characters missing (2 for a 13-character passcode), at most 2 extra:
+    # the bot writes the secret backwards and mangled ('991loFalbue', a real live leak).
+    return sum((t - w).values()) <= max(1, len(target) // 6) and sum((w - t).values()) <= 2
 
 
 class FuzzyMatchCheck(BaseCheck):
@@ -440,7 +442,7 @@ class FuzzyMatchCheck(BaseCheck):
                     continue
 
                 # A word made of the secret's characters, rearranged ('991noclaFeluB'), is a scrambled leak.
-                # Allow 1 missing and 2 extra characters for long secrets ('991noclaFebuyl', a real bot leak).
+                # Allow a few missing/extra characters for long secrets ('991noclaFebuyl', '991loFalbue': real leaks).
                 if _near_anagram(clean_word, target):
                     duration_ms = (time.perf_counter() - start_time) * 1000.0
                     return CheckResult(
