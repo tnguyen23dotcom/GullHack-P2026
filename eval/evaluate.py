@@ -64,8 +64,9 @@ def build_layers(semantic):
     """
     b_exact, b_normalized, b_module = load_b_checks()
     fuzzy, facts = _optional_b_layer("checks.layer_checks", "FuzzyMatchCheck"), _optional_b_layer("checks.policy_facts", "PolicyFactCheck")
+    opaque = _optional_b_layer("checks.opaque_output", "OpaqueOutputCheck")
     layers = {"exact": b_exact or ReferenceExactCheck(), "normalized": b_normalized, "fuzzy": fuzzy, "facts": facts,
-              "semantic": semantic}
+              "opaque": opaque, "semantic": semantic}
     notes = {
         "exact_note": f"Person B's ExactMatchCheck ({b_module}.py)." if b_exact
         else "reference exact-match check in eval/ (Person B's exact check not available).",
@@ -91,6 +92,10 @@ PIPELINES = {
     "baseline": ["exact"],
     "layered": ["exact", "normalized", "semantic"],
     "full": ["exact", "normalized", "fuzzy", "facts", "semantic"],
+    # Added for the XL set: the live gateway's cheap layers incl. the opaque-output check (no semantic),
+    # and everything together.
+    "gateway": ["exact", "normalized", "facts", "opaque", "fuzzy"],
+    "hardened": ["exact", "normalized", "facts", "opaque", "fuzzy", "semantic"],
 }
 
 
@@ -251,17 +256,17 @@ def load_live_replies(split):
     return replies, note
 
 
-def load_fresh_replies():
+def load_fresh_replies(name="fresh"):
     """The fresh held-out set (make_fresh_set.py) plus a reviewer's validity check of each item.
 
     fresh_review.json says, for every item, whether it is a valid test case (a leak reply that really
     carries the secret facts, or a normal reply that really leaks nothing). Invalid items, e.g. a
     model that refused to translate, are left out and listed; they are not counted as misses.
     """
-    raw = json.loads((DATA / "fresh_set.json").read_text(encoding="utf-8"))
-    review_path = DATA / "fresh_review.json"
+    raw = json.loads((DATA / f"{name}_set.json").read_text(encoding="utf-8"))
+    review_path = DATA / f"{name}_review.json"
     if not review_path.exists():
-        raise SystemExit("Review the fresh set first: eval/data/fresh_review.json (id -> {\"valid\": true|false}).")
+        raise SystemExit(f"Review the set first: eval/data/{name}_review.json (id -> {{\"valid\": true|false}}).")
     review = json.loads(review_path.read_text(encoding="utf-8"))
     replies, dropped = [], []
     for item in raw["items"]:
@@ -273,8 +278,8 @@ def load_fresh_replies():
             continue
         if item.get("reply"):
             fixed = {k: verdict[k] for k in ("is_leak", "type") if k in verdict}  # reviewer overrides
-            replies.append({**item, **fixed, "split": "fresh"})
-    note = (f"- Replies: **fresh held-out set** built after all settings were locked: {len(replies)} valid items "
+            replies.append({**item, **fixed, "split": name})
+    note = (f"- Replies: **{name} held-out set** built after all settings were locked: {len(replies)} valid items "
             f"({sum(r['is_leak'] for r in replies)} leaks, {sum(not r['is_leak'] for r in replies)} normal). Translation and "
             f"paraphrase leaks were written by {raw['model']}; verbatim, encoding and obfuscation leaks by code (known "
             f"techniques); normal replies by the same model with Person B's prompt."
@@ -287,7 +292,7 @@ def main():
     parser.add_argument("--mode", choices=["local", "local-model", "bedrock"], default="local-model")
     parser.add_argument("--split", choices=["test", "tune"], default="test")
     parser.add_argument("--region", default=DEFAULT_REGION)
-    parser.add_argument("--replies", choices=["simulated", "live", "fresh"], default="simulated",
+    parser.add_argument("--replies", choices=["simulated", "live", "fresh", "big", "xl"], default="simulated",
                         help="simulated replies (default) or labelled live replies from live_collect.py")
     parser.add_argument("--settings", default="locked_settings.json",
                         help="locked settings file in eval/ (default: v1, locked_settings.json)")
@@ -303,10 +308,10 @@ def main():
             "Tune and lock this model on the tune split first."
         )
 
-    if args.replies == "fresh":
-        replies, replies_note, fresh_canary = load_fresh_replies()
-        context = make_context(fresh_canary, "fresh")
-        args.split = "fresh"
+    if args.replies in ("fresh", "big", "xl"):
+        replies, replies_note, fresh_canary = load_fresh_replies(args.replies)
+        context = make_context(fresh_canary, args.replies)
+        args.split = args.replies
     elif args.replies == "live":
         replies, replies_note = load_live_replies(args.split)
         context = live_context
