@@ -64,7 +64,7 @@ Create `infra/terraform/secrets.auto.tfvars` (it is git-ignored, never commit it
 alert_email = "security-team@your-company.com"
 ```
 
-Review `infra/terraform/terraform.tfvars`:
+Settings you can put in `infra/terraform/terraform.tfvars` (anything left out uses the default):
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
