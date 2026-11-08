@@ -14,9 +14,25 @@ locals {
 
 data "archive_file" "gateway" {
   type        = "zip"
-  source_dir  = "${path.module}/../lambda"
   output_path = "${path.module}/build/gateway.zip"
-  excludes    = ["__pycache__"]
+
+  # The Lambda handler (infra/lambda) goes at the root of the zip
+  dynamic "source" {
+    for_each = [for f in fileset("${path.module}/../lambda", "**") : f if !strcontains(f, "__pycache__")]
+    content {
+      content  = file("${path.module}/../lambda/${source.value}")
+      filename = source.value
+    }
+  }
+
+  # Person B's checks/ folder goes inside the zip as checks/
+  dynamic "source" {
+    for_each = [for f in fileset("${path.module}/../../checks", "**") : f if !strcontains(f, "__pycache__") && !startswith(f, "tests/")]
+    content {
+      content  = file("${path.module}/../../checks/${source.value}")
+      filename = "checks/${source.value}"
+    }
+  }
 }
 
 # ---------- IAM (least privilege) ----------
@@ -95,7 +111,7 @@ resource "aws_apigatewayv2_api" "chat" {
   cors_configuration {
     allow_origins = var.allowed_origins
     allow_methods = ["POST", "OPTIONS"]
-    allow_headers = ["content-type"]
+    allow_headers = ["content-type", "x-session-id"]
     max_age       = 300
   }
 }
