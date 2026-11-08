@@ -9,12 +9,14 @@
     --bg: #eef2f4; --panel: #ffffff; --ink: #17252e; --muted: #5b6b75; --line: #cfd9de;
     --accent: #0b6e8a; --soft: #e3ebef; --block: #b3261e; --block-bg: #fbe9e7;
     --exact: #0b6e8a; --normalized: #7a5a00; --semantic: #6a3fa0; --fuzzy: #2e7d32;
+    --policy: #00796b; --opaque: #c2185b; --links: #5d4037;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #0f171c; --panel: #16222a; --ink: #e6eef2; --muted: #93a4ae; --line: #2a3b45;
       --accent: #4fb3d1; --soft: #1f303a; --block: #ff8a80; --block-bg: #3a1c1a;
       --exact: #4fb3d1; --normalized: #e0b84a; --semantic: #b69cf0; --fuzzy: #7bc67e;
+      --policy: #4db6ac; --opaque: #f48fb1; --links: #bcaaa4;
     }
   }
   * { box-sizing: border-box; }
@@ -88,7 +90,7 @@
 
   // Assumed alert shape (agree on it with Person A):
   // { id, time (ISO string), session_id, attack_type, layer, score (0-1 or null), blocked (bool) }
-  const LAYERS = ["exact", "normalized", "semantic", "fuzzy"];
+     const LAYERS = ["exact", "normalized", "fuzzy", "policy", "opaque", "links", "semantic"];
   const ATTACKS = ["verbatim", "translation", "encoding", "obfuscation", "paraphrase"];
   const now = Date.now();
   const mockAlerts = [
@@ -172,15 +174,18 @@
 
   function setStatus(text) { document.getElementById("status").textContent = text; }
 
-    function mapLayer(s) {
-    s = String(s).toLowerCase();
-    if (s.includes("exact")) return "exact";
-    if (s.includes("normal")) return "normalized";
-    if (s.includes("semantic")) return "semantic";
-    if (s.includes("fuzzy")) return "fuzzy";
-    return s || "unknown";
-  }
-  
+      function mapLayer(s) {
+     s = String(s).toLowerCase();
+     if (s.includes("exact")) return "exact";
+     if (s.includes("normal")) return "normalized";
+     if (s.includes("fuzzy")) return "fuzzy";
+     if (s.includes("semantic")) return "semantic";
+     if (s.includes("policy")) return "policy";
+     if (s.includes("opaque")) return "opaque";
+     if (s.includes("link")) return "links";
+     return s || "unknown";
+   }
+
   function normalize(a) {
   const d = a.details || {};
   let t = a.created_at != null ? Number(a.created_at) : Date.parse(a.time);
