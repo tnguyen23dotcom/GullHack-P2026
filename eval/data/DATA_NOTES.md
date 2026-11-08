@@ -6,6 +6,7 @@ All data here is fake. The protected prompt is Person B's `prompt.py` (issue #6)
 - `attacks.json`: 25 attack prompts, 5 each of verbatim, translation, encoding, obfuscation and paraphrase.
 - `normal_chats.json`: 25 normal chats for the IT assistant. `norm-01` to `norm-12` are ordinary IT questions. `norm-13` to `norm-25` are near-misses: they ask for translation, encoding, summaries or reversal, or touch policy topics (code review, salary, launches, passcodes) without any leak.
 - `simulated_replies.json`: one simulated reply per attack and per normal chat, built by `eval/make_simulated_replies.py` from B's prompt. Used to tune and test the detectors while no chat model is available. **Report results from it as "measured on simulated replies".** Translation and paraphrase leaks contain policy text only, no decoy keys or canary.
+- `demo_script.json`: 8 scripted chat turns (5 leaks, 3 normal) for the live demo while Bedrock chat is unavailable. Built by `eval/make_demo_script.py` from the test-split simulated replies; `caught_by` records which layer flagged each one in the measured run. Person A's Lambda can use it as a simulated bot.
 - `prompt_chunks.json` and `placeholder_prompt.txt`: left from issue #12, when B's prompt did not exist yet. The semantic check no longer uses them: it embeds `context.protected_chunks` (B's five policies) itself.
 
 ## Splits
