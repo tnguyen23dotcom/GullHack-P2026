@@ -96,7 +96,7 @@ Requirements: Terraform 1.6 or newer, AWS CLI v2 (`us-east-1`), Bedrock access t
 ./infra/deploy.sh          # Mac/Linux     (Windows: .\infra\deploy.ps1)
 ```
 
-The script checks your tools and AWS login, runs `terraform plan`, asks for confirmation, applies, and prints the chat and alerts URLs. Tear down with `terraform destroy` in `infra/terraform`. More detail: [`infra/README.md`](infra/README.md).
+The script checks your tools and AWS login, runs `terraform plan`, asks for confirmation, applies, and prints the chat and alerts URLs. **Full step-by-step guide, including how to make it yours and publish the web pages: [`INSTRUCTIONS.md`](INSTRUCTIONS.md).**
 
 **Cost:** everything is pay-per-use (Lambda, API Gateway, DynamoDB on-demand, Bedrock per token), with a CloudWatch billing alarm at $10/month. We haven't measured cost at production scale.
 
