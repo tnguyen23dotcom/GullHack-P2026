@@ -131,14 +131,17 @@ def summarize(records, pipelines, available):
 
     attacks = [r for r in records if _is_leak(r)]
     normals = [r for r in records if not _is_leak(r)]
+    # Extra leak types (e.g. "spontaneous": the real bot leaked on a harmless question) get their own row.
+    types = ATTACK_TYPES + sorted({r["type"] for r in attacks} - set(ATTACK_TYPES))
     summary = {
+        "types": types,
         "pipelines": {}, "layers": {}, "counts": {"attacks": len(attacks), "normal": len(normals)},
         "leaks_per_type": {t: [sum(1 for r in attacks if r["type"] == t), sum(1 for r in records if r["type"] == t)]
-                           for t in ATTACK_TYPES},
+                           for t in types},
     }
     for pipe, layer_names in pipelines.items():
         per_type = {}
-        for t in ATTACK_TYPES:
+        for t in types:
             of_type = [r for r in attacks if r["type"] == t]
             per_type[t] = [sum(flagged_by(r, layer_names) for r in of_type), len(of_type)]
         summary["pipelines"][pipe] = {
@@ -150,7 +153,7 @@ def summarize(records, pipelines, available):
     for name in available:
         times = [r["layers"][name]["ms"] for r in records]
         summary["layers"][name] = {
-            "caught": {t: sum(r["layers"][name]["flagged"] for r in attacks if r["type"] == t) for t in ATTACK_TYPES},
+            "caught": {t: sum(r["layers"][name]["flagged"] for r in attacks if r["type"] == t) for t in types},
             "false_positives": sum(r["layers"][name]["flagged"] for r in normals),
             "mean_ms": statistics.mean(times) if times else 0.0,
             "max_ms": max(times) if times else 0.0,
@@ -165,6 +168,7 @@ def _cell(pair):
 
 def to_markdown(summary, info):
     pipes = list(summary["pipelines"])
+    types = summary.get("types", ATTACK_TYPES)
     lines = [
         f"# Evaluation results ({info['split']} split)",
         "",
@@ -180,7 +184,7 @@ def to_markdown(summary, info):
     ]
     if info.get("source") == "live":
         lines += ["", "## How often the live bot leaked", "", "| Attack type | Replies that leaked |", "| --- | --- |"]
-        lines += [f"| {t} | {_cell(summary['leaks_per_type'][t])} |" for t in ATTACK_TYPES]
+        lines += [f"| {t} | {_cell(summary['leaks_per_type'][t])} |" for t in types]
         lines += ["", "Detection below is counted only over replies that really leaked (n/a = no leak to catch). "
                   "False positives count every reply that did not leak, including refused attacks."]
     lines += [
@@ -190,14 +194,14 @@ def to_markdown(summary, info):
         "| Attack type | " + " | ".join(p.capitalize() for p in pipes) + " |",
         "| --- |" + " --- |" * len(pipes),
     ]
-    for t in ATTACK_TYPES:
+    for t in types:
         lines.append(f"| {t} | " + " | ".join(_cell(summary["pipelines"][p]["detection"][t]) for p in pipes) + " |")
     lines.append("| **all attacks** | " + " | ".join(f"**{_cell(summary['pipelines'][p]['all_attacks'])}**" for p in pipes) + " |")
     lines.append("| false positives (replies with no leak, flagged) | " + " | ".join(_cell(summary["pipelines"][p]["false_positives"]) for p in pipes) + " |")
-    lines += ["", "## Per layer", "", "| Layer | " + " | ".join(ATTACK_TYPES) + " | false positives | mean ms | slowest ms |",
-              "| --- |" + " --- |" * (len(ATTACK_TYPES) + 3)]
+    lines += ["", "## Per layer", "", "| Layer | " + " | ".join(types) + " | false positives | mean ms | slowest ms |",
+              "| --- |" + " --- |" * (len(types) + 3)]
     for name, s in summary["layers"].items():
-        lines.append(f"| {name} | " + " | ".join(str(s["caught"][t]) for t in ATTACK_TYPES)
+        lines.append(f"| {name} | " + " | ".join(str(s["caught"][t]) for t in types)
                      + f" | {s['false_positives']} | {s['mean_ms']:.2f} | {s['max_ms']:.2f} |")
     missing = sorted({m for p in summary["pipelines"].values() for m in p["missing_layers"]})
     if missing:
@@ -268,7 +272,8 @@ def load_fresh_replies():
             dropped.append(item["id"])
             continue
         if item.get("reply"):
-            replies.append({**item, "split": "fresh"})
+            fixed = {k: verdict[k] for k in ("is_leak", "type") if k in verdict}  # reviewer overrides
+            replies.append({**item, **fixed, "split": "fresh"})
     note = (f"- Replies: **fresh held-out set** built after all settings were locked: {len(replies)} valid items "
             f"({sum(r['is_leak'] for r in replies)} leaks, {sum(not r['is_leak'] for r in replies)} normal). Translation and "
             f"paraphrase leaks were written by {raw['model']}; verbatim, encoding and obfuscation leaks by code (known "
