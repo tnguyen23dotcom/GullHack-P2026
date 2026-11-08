@@ -12,6 +12,7 @@ import uuid
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
+from checks.link_allowlist import LinkAllowlistCheck
 from checks.check_interface import SecurityContext
 from checks.layer_checks import ExactMatchCheck, FuzzyMatchCheck, NormalizedMatchCheck
 from checks.opaque_output import OpaqueOutputCheck
@@ -33,7 +34,7 @@ bedrock = boto3.client("bedrock-runtime")
 # Egress checks (#3), cheapest first. Built once per container.
 # The semantic layer (Person C) is not here: its model is too big for this zip. Its results are
 # measured offline in eval/. Add it here only if the Lambda is moved to a container image.
-CHECKS = [ExactMatchCheck(), NormalizedMatchCheck(), PolicyFactCheck(), OpaqueOutputCheck(), FuzzyMatchCheck()]
+CHECKS = [ExactMatchCheck(), NormalizedMatchCheck(), PolicyFactCheck(), OpaqueOutputCheck(),LinkAllowlistCheck(), FuzzyMatchCheck()]
 WITHHELD_REPLY = "This reply was withheld by the security gateway because it may contain protected information."
 
 
