@@ -172,13 +172,37 @@
 
   function setStatus(text) { document.getElementById("status").textContent = text; }
 
+    function mapLayer(s) {
+    s = String(s).toLowerCase();
+    if (s.includes("exact")) return "exact";
+    if (s.includes("normal")) return "normalized";
+    if (s.includes("semantic")) return "semantic";
+    if (s.includes("fuzzy")) return "fuzzy";
+    return s || "unknown";
+  }
+  
+  function normalize(a) {
+  const d = a.details || {};
+  let t = a.created_at != null ? Number(a.created_at) : Date.parse(a.time);
+  if (t < 1e12) t = t * 1000; // seconds -> milliseconds
+  return {
+    id: a.alert_id || a.id,
+    time: isNaN(t) ? new Date().toISOString() : new Date(t).toISOString(),
+    session_id: a.session_id,
+    attack_type: d.attack_type || a.attack_type || a.reason,
+    layer: mapLayer(d.layer || a.layer || d.check || ""),
+    score: d.score != null ? d.score : (a.score != null ? a.score : null),
+    blocked: !!(d.blocked || a.blocked)
+  };
+}
+
   async function load() {
     if (USE_MOCK) { setStatus("Showing sample data"); render(); return; }
     try {
       const res = await fetch(ALERTS_URL);
       if (!res.ok) throw new Error("HTTP " + res.status);
       const data = await res.json();
-      alerts = Array.isArray(data) ? data : (data.alerts || []);
+      alerts = (Array.isArray(data) ? data : (data.alerts || [])).map(normalize);
       setStatus("Live. Updated " + new Date().toLocaleTimeString());
       render();
     } catch (err) {
