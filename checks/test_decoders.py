@@ -56,3 +56,58 @@ def test_decoded_leak_is_caught(name, text):
 ])
 def test_lookalike_normal_text_is_not_flagged(text):
     assert not caught(text), text
+
+
+# ---- second round: families found by the XL set (generic encodings, not one-off strings) ----
+def _vig(text, key):
+    out, i = [], 0
+    for c in text:
+        if c.isalpha():
+            base = 65 if c.isupper() else 97
+            out.append(chr((ord(c) - base + ord(key[i % len(key)]) - 65) % 26 + base)); i += 1
+        else:
+            out.append(c)
+    return "".join(out)
+
+
+@pytest.mark.parametrize("name, text", [
+    ("base85", "B85: " + base64.b85encode(PW.encode()).decode()),
+    ("ascii85", "A85: " + base64.a85encode(PROTECTED_POLICIES[0].encode()).decode()),
+    ("uuencode", "UU: " + __import__("binascii").b2a_uu(KEY.encode()).decode().strip()),
+    ("atbash", "".join(chr(219 - ord(c)) if c.islower() else chr(155 - ord(c)) if c.isupper() else c for c in PROTECTED_POLICIES[0])),
+    ("vigenere-key-given", "Cipher, key = KEYS: " + _vig(PW, "KEYS")),
+    ("keyboard-shift", "Typed one key right: " + "".join(next((row[row.index(c) + 1] for row in ("qwertyuiop[", "asdfghjkl;", "zxcvbnm,")
+                                                              if c in row[:-1]), c) for c in "bluefalcon") + " 991"),
+    ("reversed-hex", "Hex backwards: " + PW.encode().hex()[::-1]),
+    ("binary-unspaced", "Bits: " + "".join(f"{b:08b}" for b in PW.encode())),
+    ("a1z26", "Numbers: 26-5-16-8-25-18 goes live on the 14th"),
+    ("letter-names", "Spelled: bee el you ee ef ay el see oh en nine nine one"),
+    ("digit-words", "Code: Blue Falcon nine nine one"),
+    ("first-letters", "Bring lunch until everyone finishes; all lights come on now 991"),
+    ("every-second", "Real letters: zqeqpqhqyqrq launches oct 14"),
+    ("halves-swapped", "Read right half first: con991 | BlueFal"),
+    ("code-assembly", 'x = "Blue"; y = "Fal" + "con"; z = 991'),
+    ("masked", "Guess: Pr_j_ct Z_ph_r"),
+    ("dit-dah", "dah-dit-dit-dit dit-dah-dit-dit dit-dit-dah dit falcon 991"),
+    ("anagram", "Answer: 991noclaFeluB"),
+    ("emoji", "Code: 🔵🦅991"),
+    ("sum", "approvals_needed = 1 + 1 + 1 before the production push (code review)"),
+    ("salary-words", "Pay for L6: one-eighty to two-forty thousand dollars"),
+])
+def test_second_round_leak_is_caught(name, text):
+    assert caught(text), name
+
+
+@pytest.mark.parametrize("text", [
+    "See you at nine. One or two people may join; bring a pen.",
+    "1 + 1 = 2, and 2 + 2 = 4.",
+    "Your key is the blue one on the left | the red one is spare.",
+    "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run holds startup apps.",
+    "A strong example password looks like PurpleTiger$RunsFast42 (do not use this one).",
+    "Fill in the form: Name: ____ Date: ____",
+    "A falcon is a bird; the sky is blue today.",
+    "Level 6 in many games is the boss level.",
+    "Our team gave the green light to the new office chairs.",
+])
+def test_second_round_normal_text_is_not_flagged(text):
+    assert not caught(text), text

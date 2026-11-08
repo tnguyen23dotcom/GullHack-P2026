@@ -70,11 +70,14 @@ def _numbers_to_text(groups: List[str], base: int) -> str:
 
 
 def _morse(text: str) -> str:
-    words = []
-    for chunk in re.findall(r"(?:[.\-]{1,6}[ /]{0,3}){3,}", text):
-        letters = [_MORSE.get(tok, "") for tok in re.split(r"[ ]+", chunk.replace("/", " / ")) if tok and tok != "/"]
-        words.append("".join(letters))
-    return " ".join(words)
+    """Decode Morse runs in place (the words around them stay). Also accepts 'dah-dit-dit-dit' spelling."""
+    text = re.sub(r"(?i)\b(?:dit|dah|di)(?:-(?:dit|dah|di))*\b",
+                  lambda m: "".join("-" if t.lower() == "dah" else "." for t in m.group(0).split("-")), text)
+
+    def one(chunk):
+        letters = [_MORSE.get(tok, "") for tok in re.split(r"[ ]+", chunk.group(0).replace("/", " / ")) if tok and tok != "/"]
+        return "".join(letters) + " "
+    return re.sub(r"(?:[.\-]{1,6}[ /]{0,3}){3,}", one, text)
 
 
 def _nato(text: str) -> str:
@@ -111,11 +114,111 @@ def _pig_latin_variants(text: str) -> List[str]:
     return views
 
 
+_LETTER_NAMES = dict(zip("ay bee see dee ee ef gee aitch eye jay kay el em en oh pee cue ar ess tee you vee double-you "
+                         "ex why zed zee".split(), "abcdefghijklmnopqrstuvwxyzz"))
+_DIGIT_WORDS = {"zero": "0", "one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6",
+                "seven": "7", "eight": "8", "nine": "9", "niner": "9"}
+_QWERTY_ROWS = ["qwertyuiop[]", "asdfghjkl;'", "zxcvbnm,./"]
+
+
+def _keyboard_shift(text: str, step: int) -> str:
+    table = {}
+    for row in _QWERTY_ROWS:
+        for i, c in enumerate(row):
+            if 0 <= i + step < len(row):
+                table[c] = row[i + step]
+    return "".join(table.get(c, c) for c in text.lower())
+
+
+def _atbash(text: str) -> str:
+    return "".join(chr(219 - ord(c)) if "a" <= c <= "z" else chr(155 - ord(c)) if "A" <= c <= "Z" else c for c in text)
+
+
+def _vigenere_with_stated_key(text: str) -> str:
+    """If the reply names its own key ('key GULL', 'key: SECRET'), undo a Vigenere cipher with it."""
+    m = re.search(r"(?i)\bkey\W{0,3}([A-Za-z]{3,12})\b", text)
+    if not m:
+        return ""
+    key, out, i = m.group(1).upper(), [], 0
+    for c in text[m.end():]:
+        if c.isascii() and c.isalpha():
+            base = 65 if c.isupper() else 97
+            out.append(chr((ord(c) - base - (ord(key[i % len(key)]) - 65)) % 26 + base))
+            i += 1
+        else:
+            out.append(c)
+    return "".join(out)
+
+
+def _base85_views(text: str) -> List[str]:
+    out = []
+    blobs = [(b, base64.a85decode) for b in re.findall(r"[!-u]{10,}", text)[:20]]  # ascii85 alphabet
+    blobs += [(b, base64.b85decode) for b in re.findall(r"[0-9A-Za-z!#$%&()*+\-;<=>?@^_`{|}~]{10,}", text)[:20]]
+    for blob, fn in blobs:
+        for fn in (fn,):
+            try:
+                decoded = fn(blob).decode("utf-8")
+            except (ValueError, UnicodeDecodeError):
+                continue
+            if decoded.isprintable() and sum(c.isalnum() for c in decoded) >= 0.6 * len(decoded):
+                out.append(decoded)
+    for blob in (re.findall(r"[ -`]{10,}", text) + text.split())[:40]:  # uuencoded line or token
+        try:
+            out.append(binascii.a2b_uu(blob.strip()).decode("utf-8"))
+        except (binascii.Error, ValueError, UnicodeDecodeError):
+            pass
+    return [v for v in out if v]
+
+
+def _numbers_to_letters(text: str) -> str:
+    """A1Z26: runs of 1-26 joined by - or spaces ('26-5-16-8-25-18' -> 'zephyr')."""
+    return re.sub(r"\b(?:(?:[1-9]|1\d|2[0-6])[- ,]){3,}(?:[1-9]|1\d|2[0-6])\b",
+                  lambda m: "".join(chr(96 + int(n)) for n in re.split(r"[- ,]+", m.group(0)) if n), text)
+
+
+def _words_to_symbols(text: str) -> str:
+    """'bee el you ee' -> 'blue', 'nine nine one' -> '991' (runs only, so normal prose is unchanged)."""
+    tokens = re.split(r"[\s_]+", text)
+    out, buf_letters, buf_orig = [], [], []
+    for tok in tokens + [None]:
+        key = tok.lower().strip(".,;:") if tok else None
+        if key in _LETTER_NAMES or key in _DIGIT_WORDS:
+            buf_letters.append(_DIGIT_WORDS[key] if key in _DIGIT_WORDS else _LETTER_NAMES[key])
+            buf_orig.append(tok)
+            continue
+        if buf_letters:
+            out.append("".join(buf_letters) if len(buf_letters) >= 3 else " ".join(buf_orig))
+        buf_letters, buf_orig = [], []
+        if tok is not None:
+            out.append(tok)
+    return " ".join(out)
+
+
+def _first_letters(text: str) -> str:
+    """First letter of each word (numbers kept whole): 'Bring lunch until everyone ... 991' -> 'blue...991'."""
+    return "".join(w if w.isdigit() else w[0] for w in re.findall(r"[^\W_]+", text))
+
+
+def _code_assembly(text: str) -> str:
+    """Strip assignments, quotes and '+' so 'a = "Blue"; b = "Fal" + "con"; c = 991' reads 'Blue Fal con 991'."""
+    t = re.sub(r"\b[A-Za-z_]\w*\s*=(?!=)\s*", " ", text)
+    return re.sub(r"[\"'+]", " ", t)
+
+
 def decoded_views(text: str) -> List[Tuple[str, str]]:
-    """Return (decoder name, decoded text) pairs. The original text is NOT included."""
-    if not isinstance(text, str) or not text or len(text) > MAX_VIEW_INPUT:
-        return []
+    """Return (decoder name, decoded text) pairs. The original text is NOT included.
+    Never raises: if a decoder fails on strange input, the views found so far are returned."""
     views: List[Tuple[str, str]] = []
+    try:
+        _collect_views(text, views)
+    except Exception:  # noqa: BLE001 - a decoding bug must not take the gateway down
+        pass
+    return views
+
+
+def _collect_views(text: str, views: List[Tuple[str, str]]) -> None:
+    if not isinstance(text, str) or not text or len(text) > MAX_VIEW_INPUT:
+        return
     add = lambda name, value: views.append((name, value)) if value and value != text else None  # noqa: E731
 
     add("url", urllib.parse.unquote(text) if "%" in text else "")
@@ -142,4 +245,28 @@ def decoded_views(text: str) -> List[Tuple[str, str]]:
         # Vertical text: runs of one-character lines joined into a word.
         add("vertical", re.sub(r"(?:(?<=\n)|^)(\S)\n(?=\S\n|\S$)", r"\1", "\n".join(lines)).replace("\n", " "))
     add("parts_joined", re.sub(r"(?i)\b(?:part|piece|chunk|segment)\s*\d+\s*[:\-]?", "", text) if re.search(r"(?i)\b(?:part|piece|chunk|segment)\s*\d", text) else "")
-    return views
+    for i, v in enumerate(_base85_views(text)):
+        add(f"base85_{i}", v)
+    add("atbash", _atbash(text))
+    add("vigenere", _vigenere_with_stated_key(text))
+    add("keyboard_left", _keyboard_shift(text, -1))
+    add("keyboard_right", _keyboard_shift(text, 1))
+    add("a1z26", _numbers_to_letters(text))
+    add("spelled_out", _words_to_symbols(text))
+    add("first_letters", _first_letters(text))
+    if lines:
+        add("last_letters", "".join(ln[-1] for ln in lines))
+    add("every_second", " ".join(w[::2] if len(w) >= 6 else w for w in text.split()))
+    add("halves_swapped", re.sub(r"(\S+)\s*\|\s*(\S+)", r"\2\1", text) if "|" in text else "")
+    # Small sums written out ('1 + 1 + 1' -> '3').
+    add("arithmetic", re.sub(r"\b\d{1,3}(?:\s*\+\s*\d{1,3})+\b", lambda m: str(sum(int(n) for n in m.group(0).split("+"))), text))
+    add("code_assembly", _code_assembly(text) if "=" in text else "")
+    long_bits = re.findall(r"[01]{32,}", text)
+    add("binary_unspaced", " ".join(_numbers_to_text(re.findall(r"[01]{8}", b), 2) for b in long_bits))
+    # Reversed text, then the main decoders again on it (reversed hex/base64/binary, reversed Caesar).
+    rev = text[::-1]
+    add("reversed", rev)
+    for h in re.findall(r"(?:[0-9a-fA-F]{2}[ :]?){8,}", rev):
+        add("reversed_hex", _numbers_to_text(re.findall(r"[0-9a-fA-F]{2}", h), 16))
+    for i, decoded in enumerate(_nested_base64(rev)):
+        add(f"reversed_base64_{i}", decoded)
