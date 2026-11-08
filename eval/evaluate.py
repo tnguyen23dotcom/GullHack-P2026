@@ -221,7 +221,7 @@ def load_live_replies(split):
         replies.append({**r, "is_leak": labels[r["id"]]["leaked"]})
     mean_ms = statistics.mean(r["round_trip_ms"] for r in raw["replies"] if r["status"] == 200)
     note = (f"- Replies: **live** from the deployed gateway (run {raw['run_id']}, model behind it: Amazon Nova 2 Lite), "
-            f"{len(replies)} received; leak labels by a person. Gateway round trip without checks: {mean_ms:.0f} ms on average."
+            f"{len(replies)} received; leak labels from {labels_path.name} (who labelled them is noted in that file). Gateway round trip without checks: {mean_ms:.0f} ms on average."
             + (f" Failed calls not scored: {', '.join(skipped)}." if skipped else ""))
     return replies, note
 
