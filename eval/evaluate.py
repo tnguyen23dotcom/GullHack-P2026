@@ -287,7 +287,7 @@ def main():
     parser.add_argument("--mode", choices=["local", "local-model", "bedrock"], default="local-model")
     parser.add_argument("--split", choices=["test", "tune"], default="test")
     parser.add_argument("--region", default=DEFAULT_REGION)
-    parser.add_argument("--replies", choices=["simulated", "live", "fresh", "big"], default="simulated",
+    parser.add_argument("--replies", choices=["simulated", "live", "fresh", "big", "xl"], default="simulated",
                         help="simulated replies (default) or labelled live replies from live_collect.py")
     parser.add_argument("--settings", default="locked_settings.json",
                         help="locked settings file in eval/ (default: v1, locked_settings.json)")
@@ -303,7 +303,7 @@ def main():
             "Tune and lock this model on the tune split first."
         )
 
-    if args.replies in ("fresh", "big"):
+    if args.replies in ("fresh", "big", "xl"):
         replies, replies_note, fresh_canary = load_fresh_replies(args.replies)
         context = make_context(fresh_canary, args.replies)
         args.split = args.replies
