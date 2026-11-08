@@ -91,6 +91,11 @@ This is your own README on the `person-d-web` branch. It lists your tasks, the t
 - **You need from C:** the final numbers (C5) for the results slide, and from everyone the facts for the demo script.
 - **You give to everyone:** the demo script (D5) so the team can rehearse it (issue #23).
 
+## API endpoints from Person A
+
+- **Chat API (A1):** `POST https://94v13m7mj1.execute-api.us-east-1.amazonaws.com/chat` with a JSON body `{"session_id": "...", "message": "..."}`. If the API is redeployed, get the current URL from Person A or run `terraform output` in `infra/terraform`.
+- **Alerts read endpoint (A4):** not deployed yet.
+
 ## Tools to set up first (everyone)
 
 - A single AWS account for the team, with the AWS CLI configured for anyone who deploys

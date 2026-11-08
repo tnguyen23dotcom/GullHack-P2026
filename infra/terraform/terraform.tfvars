@@ -1,1 +1,1 @@
-   model_id = "us.anthropic.claude-haiku-5-5"
+   model_id = "us.amazon.nova-2-lite-v1:0"
