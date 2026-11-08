@@ -63,17 +63,35 @@ def build_layers(semantic):
     The normalized layer is B's or None (reported as not available, never guessed).
     """
     b_exact, b_normalized, b_module = load_b_checks()
-    layers = {"exact": b_exact or ReferenceExactCheck(), "normalized": b_normalized, "semantic": semantic}
+    fuzzy, facts = _optional_b_layer("checks.layer_checks", "FuzzyMatchCheck"), _optional_b_layer("checks.policy_facts", "PolicyFactCheck")
+    layers = {"exact": b_exact or ReferenceExactCheck(), "normalized": b_normalized, "fuzzy": fuzzy, "facts": facts,
+              "semantic": semantic}
     notes = {
         "exact_note": f"Person B's ExactMatchCheck ({b_module}.py)." if b_exact
         else "reference exact-match check in eval/ (Person B's exact check not available).",
         "normalized_note": f"Person B's NormalizedMatchCheck ({b_module}.py)." if b_normalized
         else "**not available yet** (Person B, issue #7).",
+        "extra_note": "Fuzzy (#9): " + ("Person B's FuzzyMatchCheck" if fuzzy else "not available")
+        + "; policy facts (layer 2b): " + ("Person B's PolicyFactCheck" if facts else "not available") + ".",
     }
     return layers, notes
 
 
-PIPELINES = {"baseline": ["exact"], "layered": ["exact", "normalized", "semantic"]}
+def _optional_b_layer(module_name, class_name):
+    """One of Person B's later layers, or None if this checkout does not have it yet."""
+    try:
+        return getattr(importlib.import_module(module_name), class_name)()
+    except (ModuleNotFoundError, AttributeError):
+        return None
+
+
+# "layered" is the v1/v2 comparison (kept so earlier results stay reproducible).
+# "full" is everything the gateway can run: B's four cheap layers plus the semantic layer.
+PIPELINES = {
+    "baseline": ["exact"],
+    "layered": ["exact", "normalized", "semantic"],
+    "full": ["exact", "normalized", "fuzzy", "facts", "semantic"],
+}
 
 
 def _is_leak(record):
@@ -113,14 +131,17 @@ def summarize(records, pipelines, available):
 
     attacks = [r for r in records if _is_leak(r)]
     normals = [r for r in records if not _is_leak(r)]
+    # Extra leak types (e.g. "spontaneous": the real bot leaked on a harmless question) get their own row.
+    types = ATTACK_TYPES + sorted({r["type"] for r in attacks} - set(ATTACK_TYPES))
     summary = {
+        "types": types,
         "pipelines": {}, "layers": {}, "counts": {"attacks": len(attacks), "normal": len(normals)},
         "leaks_per_type": {t: [sum(1 for r in attacks if r["type"] == t), sum(1 for r in records if r["type"] == t)]
-                           for t in ATTACK_TYPES},
+                           for t in types},
     }
     for pipe, layer_names in pipelines.items():
         per_type = {}
-        for t in ATTACK_TYPES:
+        for t in types:
             of_type = [r for r in attacks if r["type"] == t]
             per_type[t] = [sum(flagged_by(r, layer_names) for r in of_type), len(of_type)]
         summary["pipelines"][pipe] = {
@@ -132,7 +153,7 @@ def summarize(records, pipelines, available):
     for name in available:
         times = [r["layers"][name]["ms"] for r in records]
         summary["layers"][name] = {
-            "caught": {t: sum(r["layers"][name]["flagged"] for r in attacks if r["type"] == t) for t in ATTACK_TYPES},
+            "caught": {t: sum(r["layers"][name]["flagged"] for r in attacks if r["type"] == t) for t in types},
             "false_positives": sum(r["layers"][name]["flagged"] for r in normals),
             "mean_ms": statistics.mean(times) if times else 0.0,
             "max_ms": max(times) if times else 0.0,
@@ -147,6 +168,7 @@ def _cell(pair):
 
 def to_markdown(summary, info):
     pipes = list(summary["pipelines"])
+    types = summary.get("types", ATTACK_TYPES)
     lines = [
         f"# Evaluation results ({info['split']} split)",
         "",
@@ -157,11 +179,12 @@ def to_markdown(summary, info):
         f"locked on the tune split)" + (f"; policies left out: {info['skip_policies']}" if info.get("skip_policies") else "") + ".",
         f"- Exact layer: {info['exact_note']}",
         f"- Normalized layer: {info['normalized_note']}",
+        f"- Other layers: {info.get('extra_note', 'n/a')}",
         f"- Latency: {info['latency_note']}",
     ]
     if info.get("source") == "live":
         lines += ["", "## How often the live bot leaked", "", "| Attack type | Replies that leaked |", "| --- | --- |"]
-        lines += [f"| {t} | {_cell(summary['leaks_per_type'][t])} |" for t in ATTACK_TYPES]
+        lines += [f"| {t} | {_cell(summary['leaks_per_type'][t])} |" for t in types]
         lines += ["", "Detection below is counted only over replies that really leaked (n/a = no leak to catch). "
                   "False positives count every reply that did not leak, including refused attacks."]
     lines += [
@@ -171,14 +194,14 @@ def to_markdown(summary, info):
         "| Attack type | " + " | ".join(p.capitalize() for p in pipes) + " |",
         "| --- |" + " --- |" * len(pipes),
     ]
-    for t in ATTACK_TYPES:
+    for t in types:
         lines.append(f"| {t} | " + " | ".join(_cell(summary["pipelines"][p]["detection"][t]) for p in pipes) + " |")
     lines.append("| **all attacks** | " + " | ".join(f"**{_cell(summary['pipelines'][p]['all_attacks'])}**" for p in pipes) + " |")
     lines.append("| false positives (replies with no leak, flagged) | " + " | ".join(_cell(summary["pipelines"][p]["false_positives"]) for p in pipes) + " |")
-    lines += ["", "## Per layer", "", "| Layer | " + " | ".join(ATTACK_TYPES) + " | false positives | mean ms | slowest ms |",
-              "| --- |" + " --- |" * (len(ATTACK_TYPES) + 3)]
+    lines += ["", "## Per layer", "", "| Layer | " + " | ".join(types) + " | false positives | mean ms | slowest ms |",
+              "| --- |" + " --- |" * (len(types) + 3)]
     for name, s in summary["layers"].items():
-        lines.append(f"| {name} | " + " | ".join(str(s["caught"][t]) for t in ATTACK_TYPES)
+        lines.append(f"| {name} | " + " | ".join(str(s["caught"][t]) for t in types)
                      + f" | {s['false_positives']} | {s['mean_ms']:.2f} | {s['max_ms']:.2f} |")
     missing = sorted({m for p in summary["pipelines"].values() for m in p["missing_layers"]})
     if missing:
@@ -228,12 +251,43 @@ def load_live_replies(split):
     return replies, note
 
 
+def load_fresh_replies():
+    """The fresh held-out set (make_fresh_set.py) plus a reviewer's validity check of each item.
+
+    fresh_review.json says, for every item, whether it is a valid test case (a leak reply that really
+    carries the secret facts, or a normal reply that really leaks nothing). Invalid items, e.g. a
+    model that refused to translate, are left out and listed; they are not counted as misses.
+    """
+    raw = json.loads((DATA / "fresh_set.json").read_text(encoding="utf-8"))
+    review_path = DATA / "fresh_review.json"
+    if not review_path.exists():
+        raise SystemExit("Review the fresh set first: eval/data/fresh_review.json (id -> {\"valid\": true|false}).")
+    review = json.loads(review_path.read_text(encoding="utf-8"))
+    replies, dropped = [], []
+    for item in raw["items"]:
+        verdict = review.get(item["id"], {})
+        if not item.get("reply") or not isinstance(verdict.get("valid"), bool):
+            raise SystemExit(f"Missing reply or review for {item['id']}.") if item.get("reply") else dropped.append(item["id"])
+        if verdict.get("valid") is False:
+            dropped.append(item["id"])
+            continue
+        if item.get("reply"):
+            fixed = {k: verdict[k] for k in ("is_leak", "type") if k in verdict}  # reviewer overrides
+            replies.append({**item, **fixed, "split": "fresh"})
+    note = (f"- Replies: **fresh held-out set** built after all settings were locked: {len(replies)} valid items "
+            f"({sum(r['is_leak'] for r in replies)} leaks, {sum(not r['is_leak'] for r in replies)} normal). Translation and "
+            f"paraphrase leaks were written by {raw['model']}; verbatim, encoding and obfuscation leaks by code (known "
+            f"techniques); normal replies by the same model with Person B's prompt."
+            + (f" Left out as invalid: {', '.join(dropped)}." if dropped else ""))
+    return replies, note, raw["canary"]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--mode", choices=["local", "local-model", "bedrock"], default="local-model")
     parser.add_argument("--split", choices=["test", "tune"], default="test")
     parser.add_argument("--region", default=DEFAULT_REGION)
-    parser.add_argument("--replies", choices=["simulated", "live"], default="simulated",
+    parser.add_argument("--replies", choices=["simulated", "live", "fresh"], default="simulated",
                         help="simulated replies (default) or labelled live replies from live_collect.py")
     parser.add_argument("--settings", default="locked_settings.json",
                         help="locked settings file in eval/ (default: v1, locked_settings.json)")
@@ -249,7 +303,11 @@ def main():
             "Tune and lock this model on the tune split first."
         )
 
-    if args.replies == "live":
+    if args.replies == "fresh":
+        replies, replies_note, fresh_canary = load_fresh_replies()
+        context = make_context(fresh_canary, "fresh")
+        args.split = "fresh"
+    elif args.replies == "live":
         replies, replies_note = load_live_replies(args.split)
         context = live_context
     else:
@@ -285,12 +343,12 @@ def main():
     if fake:
         print("FAKE embedder: these numbers only check the script. Nothing was written.")
         return
-    if args.split == "tune":
+    if args.split == "tune":  # (the fresh set is never tuned on, so it is written)
         print("Tune split: data already used for tuning. Nothing was written; final numbers come from the test split.")
         return
     out_dir = EVAL / "results"
     out_dir.mkdir(exist_ok=True)
-    live = "_live" if args.replies == "live" else ""
+    live = "_live" if args.replies == "live" else ""  # fresh results are named results_fresh_...
     tag = "" if version == "v1" else f"_{version}"  # v1 keeps its original file names
     stem = f"results_{args.split}{live}{tag}_{model_name(args.mode).replace(':', '_')}"
     (out_dir / f"{stem}.md").write_text(markdown, encoding="utf-8")
