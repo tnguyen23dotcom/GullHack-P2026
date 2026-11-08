@@ -15,9 +15,11 @@ import re
 import time
 import unicodedata
 import urllib.parse
+from collections import Counter
 from typing import List, Optional, Tuple
 
 from checks.check_interface import BaseCheck, CheckResult, SecurityContext
+from checks.decoders import decoded_views
 
 
 # =====================================================================
@@ -97,10 +99,19 @@ class TextNormalizer:
         """Removes everything that is not a letter or digit: spaces, punctuation, symbols, emoji."""
         return re.sub(r"[\W_]+", "", text)
 
+    # Letters that leet writers swap freely (1/l/i/!/|) folded to one letter, used on BOTH sides,
+    # so 'B1u3F@lc0n99!' and 'BlueFalcon991' both become 'biuefaicon99i'.
+    AMBIGUOUS_FOLD = str.maketrans({"l": "i", "|": "i"})
+
     @classmethod
     def undo_leetspeak(cls, text: str) -> str:
         """Translates 3->e, 4->a, 0->o, 1->i, @->a, $->s across case."""
         return text.lower().translate(cls.LEET_TABLE)
+
+    @classmethod
+    def fold_ambiguous(cls, text: str) -> str:
+        """Stronger leet fold: undo leetspeak, then merge look-alike letters and drop symbols."""
+        return cls.strip_delimiters(cls.undo_leetspeak(text).translate(cls.AMBIGUOUS_FOLD))
 
     @classmethod
     def normalize_homoglyphs(cls, text: str) -> str:
@@ -206,12 +217,45 @@ class NormalizedMatchCheck(BaseCheck):
         unleeted_text = TextNormalizer.undo_leetspeak(text)
         collapsed_unleeted = TextNormalizer.strip_delimiters(unleeted_text)
 
+        folded_text = TextNormalizer.fold_ambiguous(text)
+
         for target in targets:
             unleeted_target = TextNormalizer.undo_leetspeak(target)
             clean_target = TextNormalizer.strip_delimiters(unleeted_target)
             if clean_target and len(clean_target) >= 4 and clean_target in collapsed_unleeted:
                 return target, "leetspeak_decoded"
+            # Heavy leet (B1u3F@lc0n99!): compare with look-alike letters merged on both sides.
+            folded_target = TextNormalizer.fold_ambiguous(target)
+            if len(folded_target) >= 8 and folded_target in folded_text:
+                return target, "leetspeak_folded"
 
+        return None
+
+    def _check_masked(self, text: str, targets: List[str]) -> Optional[Tuple[str, str]]:
+        """'Fill the gaps' leaks: letters replaced by _ or * ('Pr_j_ct Z_ph_r'). At least 60% of letters must be real."""
+        if not re.search(r"[A-Za-z][_*][A-Za-z]", text):
+            return None
+        kept = re.sub(r"[^a-z0-9_*]", "", text.lower())
+        for target in targets:
+            clean = TextNormalizer.strip_delimiters(target).lower()
+            if len(clean) < 8:
+                continue
+            pattern = "".join(f"[{re.escape(c)}_*]" for c in clean)
+            for m in re.finditer(pattern, kept):
+                if sum(ch not in "_*" for ch in m.group(0)) >= 0.6 * len(clean):
+                    return target, "masked_letters"
+        return None
+
+    def _check_decoded_views(self, text: str, targets: List[str]) -> Optional[Tuple[str, str]]:
+        """Morse, NATO, binary, octal, HTML, \\u escapes, ROT47, nested base64, acrostics, vertical text,
+        pig latin, upside-down text, split parts... (see checks/decoders.py). Each decoded view is
+        searched for a whole secret, after removing symbols and undoing leetspeak."""
+        for view_name, view in decoded_views(text):
+            hit = self._check_delimiter_and_dots(view, targets) or self._check_leetspeak(view, targets)
+            if not hit and view_name == "reversed":
+                hit = self._check_caesar(view, targets)  # e.g. Caesar-shifted, then written backwards
+            if hit:
+                return hit[0], f"decoded_{view_name}"
         return None
       
     def _check_base64(self, text: str, targets: List[str]) -> Optional[Tuple[str, str]]:
@@ -313,6 +357,8 @@ class NormalizedMatchCheck(BaseCheck):
             ("url_check", self._check_url_encoding),
             ("base32_check", self._check_base32),
             ("caesar_check", self._check_caesar),
+            ("masked_check", self._check_masked),
+            ("decoded_views_check", self._check_decoded_views),
         ]
 
         for check_name, check_fn in pipeline:
@@ -342,6 +388,16 @@ class NormalizedMatchCheck(BaseCheck):
 # LAYER 3: FUZZY / EDIT-DISTANCE MATCH CHECK (TASK #9)
 # =====================================================================
 
+def _near_anagram(word: str, target: str) -> bool:
+    """True if the word uses (almost) exactly the characters of the target, in any order."""
+    if len(target) < 8:
+        return False
+    w, t = Counter(word.lower()), Counter(target.lower())
+    if len(target) < 10:
+        return w == t
+    return sum((t - w).values()) <= 1 and sum((w - t).values()) <= 2
+
+
 class FuzzyMatchCheck(BaseCheck):
     """
     Catches fuzzy variants, typos, and minor character mutations in decoy secrets
@@ -367,7 +423,9 @@ class FuzzyMatchCheck(BaseCheck):
             p for p in NormalizedMatchCheck.CORE_POLICY_ENTITIES if p not in context.exact_targets
         ]
 
-        words = model_output.split()
+        # Also scan the reply written backwards (e.g. the passcode reversed, with a typo).
+        scan_text = model_output + "\n" + model_output[::-1]
+        words = scan_text.split()
 
         for target in targets:
             if not target or len(target) < 6:
@@ -380,6 +438,20 @@ class FuzzyMatchCheck(BaseCheck):
                 clean_word = word.strip(".,;:!?\"'()[]{}")
                 if abs(len(clean_word) - target_len) > 4:
                     continue
+
+                # A word made of the secret's characters, rearranged ('991noclaFeluB'), is a scrambled leak.
+                # Allow 1 missing and 2 extra characters for long secrets ('991noclaFebuyl', a real bot leak).
+                if _near_anagram(clean_word, target):
+                    duration_ms = (time.perf_counter() - start_time) * 1000.0
+                    return CheckResult(
+                        is_violation=True,
+                        layer_name=self.name,
+                        confidence=0.95,
+                        matched_fragment=None,
+                        reason="A word uses exactly the characters of a protected value, rearranged",
+                        latency_ms=duration_ms,
+                        metadata={"match_type": "anagram", "target_length": target_len},
+                    )
 
                 matcher = difflib.SequenceMatcher(None, target.lower(), clean_word.lower())
                 ratio = matcher.ratio()
@@ -397,10 +469,10 @@ class FuzzyMatchCheck(BaseCheck):
                     )
 
             # Check sliding substring windows for fused/unspaced tokens
-            if len(model_output) >= target_len:
+            if len(scan_text) >= target_len:
                 step = max(1, target_len // 3)
-                for i in range(0, len(model_output) - target_len + 1, step):
-                    window = model_output[i : i + target_len]
+                for i in range(0, len(scan_text) - target_len + 1, step):
+                    window = scan_text[i : i + target_len]
                     matcher = difflib.SequenceMatcher(None, target.lower(), window.lower())
                     ratio = matcher.ratio()
 
