@@ -3,36 +3,23 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Gull Hack chatbot (demo target)</title>
+<title>Gull Vault</title>
 <style>
-  :root {
-    --bg: #eef2f4;
-    --panel: #ffffff;
-    --ink: #17252e;
-    --muted: #5b6b75;
-    --line: #cfd9de;
-    --user: #17252e;
+    :root {
+    --bg: #6d1a2b;
+    --panel: #fffaf0;
+    --ink: #2a1215;
+    --muted: #6b5558;
+    --line: #e3d3b0;
+    --user: #7a1f33;
     --user-ink: #ffffff;
-    --bot: #e3ebef;
-    --accent: #0b6e8a;
+    --bot: #f6e7b8;
+    --accent: #7a1f33;
+    --gold: #f2b705;
     --block: #b3261e;
     --block-bg: #fbe9e7;
   }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0f171c;
-      --panel: #16222a;
-      --ink: #e6eef2;
-      --muted: #93a4ae;
-      --line: #2a3b45;
-      --user: #4fb3d1;
-      --user-ink: #0b1a21;
-      --bot: #1f303a;
-      --accent: #4fb3d1;
-      --block: #ff8a80;
-      --block-bg: #3a1c1a;
-    }
-  }
+  
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
   body {
@@ -54,7 +41,7 @@
   }
   header {
     padding: 14px 18px;
-    border-bottom: 1px solid var(--line);
+    border-bottom: 4px solid var(--gold);
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -120,7 +107,7 @@
     color: var(--ink);
     max-height: 140px;
   }
-  #send { background: var(--accent); border-color: var(--accent); color: #fff; padding: 0 20px; font-weight: 600; }
+  #send { background: var(--gold); border-color: var(--gold); color: #2a1215; padding: 0 20px; font-weight: 600; }
   button:disabled, textarea:disabled { opacity: 0.55; cursor: not-allowed; }
   @media (prefers-reduced-motion: no-preference) { #log { scroll-behavior: smooth; } }
 </style>
@@ -128,7 +115,7 @@
 <body>
 <div class="app">
   <header>
-    <h1>Gull Hack chatbot (demo target)</h1>
+    <h1>Gull Vault</h1>
     <div class="session">
       Session <code id="sid"></code>
       <button type="button" id="new">New session</button>
