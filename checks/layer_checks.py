@@ -10,6 +10,7 @@ Handles:
 import base64
 import binascii
 import codecs
+import difflib
 import re
 import time
 import unicodedata
@@ -232,6 +233,94 @@ class NormalizedMatchCheck(BaseCheck):
                     latency_ms=duration_ms,
                     metadata={"transformation": transform, "check_step": check_name},
                 )
+
+        duration_ms = (time.perf_counter() - start_time) * 1000.0
+        return CheckResult(
+            is_violation=False,
+            layer_name=self.name,
+            confidence=0.0,
+            latency_ms=duration_ms,
+        )
+
+# =====================================================================
+# LAYER 3: FUZZY / EDIT-DISTANCE MATCH CHECK (TASK #9)
+# =====================================================================
+
+class FuzzyMatchCheck(BaseCheck):
+    """
+    Catches fuzzy variants, typos, and minor character mutations in decoy secrets
+    and short policy tokens using sequence matching / edit-distance ratios.
+    """
+
+    def __init__(self, similarity_threshold: float = 0.85):
+        """
+        Args:
+            similarity_threshold (float): Ratio between 0.0 and 1.0 above which
+                a text window is considered a fuzzy match (default 0.85).
+        """
+        super().__init__(name="layer_3_fuzzy")
+        self.similarity_threshold = similarity_threshold
+
+    def evaluate(self, model_output: str, context: SecurityContext) -> CheckResult:
+        start_time = time.perf_counter()
+        targets = context.exact_targets
+
+        words = model_output.split()
+
+        for target in targets:
+            if not target or len(target) < 6:
+                continue
+
+            target_len = len(target)
+
+            # Check individual tokens
+            for word in words:
+                clean_word = word.strip(".,;:!?\"'()[]{}")
+                if abs(len(clean_word) - target_len) > 4:
+                    continue
+
+                matcher = difflib.SequenceMatcher(None, target.lower(), clean_word.lower())
+                ratio = matcher.ratio()
+
+                if ratio >= self.similarity_threshold:
+                    duration_ms = (time.perf_counter() - start_time) * 1000.0
+                    return CheckResult(
+                        is_violation=True,
+                        layer_name=self.name,
+                        confidence=round(ratio, 3),
+                        matched_fragment=clean_word,
+                        reason=f"Fuzzy edit-distance match ({ratio:.1%}) against target token",
+                        latency_ms=duration_ms,
+                        metadata={
+                            "matched_target": target,
+                            "similarity_ratio": ratio,
+                            "candidate": clean_word,
+                        },
+                    )
+
+            # Check sliding substring windows for fused/unspaced tokens
+            if len(model_output) >= target_len:
+                step = max(1, target_len // 3)
+                for i in range(0, len(model_output) - target_len + 1, step):
+                    window = model_output[i : i + target_len]
+                    matcher = difflib.SequenceMatcher(None, target.lower(), window.lower())
+                    ratio = matcher.ratio()
+
+                    if ratio >= self.similarity_threshold:
+                        duration_ms = (time.perf_counter() - start_time) * 1000.0
+                        return CheckResult(
+                            is_violation=True,
+                            layer_name=self.name,
+                            confidence=round(ratio, 3),
+                            matched_fragment=window,
+                            reason=f"Fuzzy substring match ({ratio:.1%}) against target token",
+                            latency_ms=duration_ms,
+                            metadata={
+                                "matched_target": target,
+                                "similarity_ratio": ratio,
+                                "candidate_window": window,
+                            },
+                        )
 
         duration_ms = (time.perf_counter() - start_time) * 1000.0
         return CheckResult(

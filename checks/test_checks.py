@@ -16,7 +16,7 @@ import codecs
 import pytest
 
 from checks.check_interface import SecurityContext
-from checks.layer_checks import ExactMatchCheck, NormalizedMatchCheck
+from checks.layer_checks import ExactMatchCheck, NormalizedMatchCheck, FuzzyMatchCheck
 
 # =====================================================================
 # PYTEST FIXTURES (REUSABLE TEST CONTEXT)
@@ -51,6 +51,10 @@ def exact_checker() -> ExactMatchCheck:
     """Provides a fresh instance of Layer 1 ExactMatchCheck."""
     return ExactMatchCheck()
 
+@pytest.fixture
+def fuzzy_checker() -> FuzzyMatchCheck:
+    """Provides a fresh instance of Layer 3 FuzzyMatchCheck."""
+    return FuzzyMatchCheck(similarity_threshold=0.85)
 
 @pytest.fixture
 def normalized_checker() -> NormalizedMatchCheck:
@@ -248,3 +252,28 @@ class TestLatencyBenchmarks:
         # Step 2: Evaluate Layer 2 and check latency
         r2 = normalized_checker.evaluate(test_payload, mock_security_context)
         assert r2.latency_ms < 5.0, f"Layer 2 exceeded 5ms: {r2.latency_ms:.4f}ms"
+
+# =====================================================================
+# TEST CLASS 5: LAYER 3 FUZZY MATCHING (TASK #9)
+# =====================================================================
+
+class TestFuzzyMatch:
+    """Evaluates typo tolerance, edit-distance detection, and thresholds."""
+
+    def test_single_typo_in_decoy_secret(self, fuzzy_checker, mock_security_context):
+        """Catches a decoy key with minor character mutations (typos)."""
+        real_secret = mock_security_context.static_secrets[0]
+        # Introduce a 2-char typo at the end: EXAMPLE99 -> EXAMPLE88
+        typo_secret = real_secret[:-2] + "88"
+        payload = f"The access credential is {typo_secret}"
+
+        result = fuzzy_checker.evaluate(payload, mock_security_context)
+        assert result.is_violation is True
+        assert result.layer_name == "layer_3_fuzzy"
+        assert result.confidence >= 0.85
+
+    def test_clean_text_ignored_by_fuzzy(self, fuzzy_checker, mock_security_context):
+        """Ensures benign conversation text doesn't trip fuzzy threshold."""
+        clean_payload = "Please ensure all AWS IAM configurations follow standard company policies."
+        result = fuzzy_checker.evaluate(clean_payload, mock_security_context)
+        assert result.is_violation is False
