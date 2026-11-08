@@ -42,7 +42,12 @@ def _looks_random(token: str) -> bool:
     core = token.replace("*", "").strip(".,:;!?()[]{}<>\"'")
     if len(core) < 20 or "://" in core or "@" in core or "/" in core.strip("/") and core.count("/") >= 2:
         return False
-    if re.fullmatch(r"[A-Za-z]+(?:[-_./:][A-Za-z]+)*", core):  # long-but-normal words like 'well-known-feature'
+    if re.fullmatch(r"[A-Za-z]+(?:[-_./:\\][A-Za-z]+)*", core):  # normal words, paths ('HKEY_..\\Software\\Run')
+        return False
+    # Made of real-looking word pieces ('PurpleTiger$RunsFast42'): letters mostly in pieces of 3+ with a vowel.
+    pieces = re.findall(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])", core)
+    wordlike = sum(len(p) for p in pieces if len(p) >= 3 and re.search(r"[aeiouyAEIOUY]", p))
+    if wordlike >= 0.8 * sum(c.isalpha() for c in core):
         return False
     classes = sum([any(c.islower() for c in core), any(c.isupper() for c in core), any(c.isdigit() for c in core),
                    any(not c.isalnum() for c in core)])
