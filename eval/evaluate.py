@@ -64,8 +64,9 @@ def build_layers(semantic):
     """
     b_exact, b_normalized, b_module = load_b_checks()
     fuzzy, facts = _optional_b_layer("checks.layer_checks", "FuzzyMatchCheck"), _optional_b_layer("checks.policy_facts", "PolicyFactCheck")
+    opaque = _optional_b_layer("checks.opaque_output", "OpaqueOutputCheck")
     layers = {"exact": b_exact or ReferenceExactCheck(), "normalized": b_normalized, "fuzzy": fuzzy, "facts": facts,
-              "semantic": semantic}
+              "opaque": opaque, "semantic": semantic}
     notes = {
         "exact_note": f"Person B's ExactMatchCheck ({b_module}.py)." if b_exact
         else "reference exact-match check in eval/ (Person B's exact check not available).",
@@ -91,6 +92,10 @@ PIPELINES = {
     "baseline": ["exact"],
     "layered": ["exact", "normalized", "semantic"],
     "full": ["exact", "normalized", "fuzzy", "facts", "semantic"],
+    # Added for the XL set: the live gateway's cheap layers incl. the opaque-output check (no semantic),
+    # and everything together.
+    "gateway": ["exact", "normalized", "facts", "opaque", "fuzzy"],
+    "hardened": ["exact", "normalized", "facts", "opaque", "fuzzy", "semantic"],
 }
 
 
