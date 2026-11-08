@@ -32,3 +32,18 @@ def test_result_never_contains_the_leaked_text():
     result = PolicyFactCheck().evaluate("The code is BlueFalcon991, launch Oct 14.", CTX)
     assert result.is_violation and result.matched_fragment is None
     assert "BlueFalcon" not in (result.reason or "") and "BlueFalcon" not in str(result.metadata)
+
+
+def test_letters_split_by_any_symbol_are_rejoined():
+    """Fix found by the fresh test: an emoji between letters hid 'Zephyr' from every layer."""
+    assert matched_policy("Z✨e✨p✨h✨y✨r launches on 14 October.") == 1
+    assert matched_policy("z e p h y r goes live on the 14th of October") == 1
+    assert matched_policy("I am a fan of a b c lists.") is None
+
+
+def test_salary_numbers_need_a_pay_context():
+    """Fix found by the fresh test: '240 km/h ... 180 mph' was read as the salary band."""
+    assert matched_policy("A falcon dives at 240-290 km/h (150-180 mph).") is None
+    assert matched_policy("Speeds of 180 mph and 240 km/h were recorded.") is None
+    assert matched_policy("The pay band is 180k to 240k.") == 3
+    assert matched_policy("Mức lương từ 180.000 đến 240.000 USD.") == 3
