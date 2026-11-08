@@ -43,10 +43,11 @@ ATTACK_TYPES = ["verbatim", "translation", "encoding", "obfuscation", "paraphras
 def load_b_checks():
     """Person B's exact and normalized checks (#7) as (exact, normalized, module name), or (None, None, None).
 
-    B's file is layers_checks.py (its docstring says layer_checks.py, so both names are tried).
-    It is found the same way as B's other files (repo root, checks/, or GULLHACK_B_DIR).
+    B's current file is checks/layer_checks.py (a package module). Older copies named
+    layers_checks.py / layer_checks.py are tried only if it is missing, because the old
+    top-level layers_checks.py on main predates B's policy-phrase fix (#10).
     """
-    for module_name in ("layers_checks", "layer_checks"):
+    for module_name in ("checks.layer_checks", "layer_checks", "layers_checks"):
         try:
             module = importlib.import_module(module_name)
         except ModuleNotFoundError:
