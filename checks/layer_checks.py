@@ -66,8 +66,6 @@ class TextNormalizer:
         cleaned = cls.undo_leetspeak(cleaned)
         cleaned = re.sub(r"(?<=\b[A-Za-z])[.\-_](?=[A-Za-z]\b)", "", cleaned)
         return cleaned
-
-
 # =====================================================================
 # LAYER 1: EXACT MATCH CHECK
 # =====================================================================
@@ -157,7 +155,7 @@ class NormalizedMatchCheck(BaseCheck):
                 return target, "leetspeak_decoded"
 
         return None
-
+      
     def _check_base64(self, text: str, targets: List[str]) -> Optional[Tuple[str, str]]:
         candidates = self._b64_pattern.findall(text)
 

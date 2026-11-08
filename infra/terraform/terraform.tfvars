@@ -1,0 +1,1 @@
+   model_id = "us.amazon.nova-2-lite-v1:0"
