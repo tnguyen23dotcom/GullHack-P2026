@@ -22,6 +22,7 @@ import unicodedata
 from typing import Dict, List, Optional
 
 from checks.check_interface import BaseCheck, CheckResult, SecurityContext
+from checks.layer_checks import canonicalize
 
 # Each group is a list of patterns; a group matches when ANY of its patterns is found.
 # Latin-script words use word boundaries; CJK and digits-with-units are plain substrings.
@@ -65,7 +66,7 @@ _COMPILED = {n: [[re.compile(p, re.IGNORECASE) for p in group] for group in grou
 
 def _prepare(text: str) -> str:
     """Lower-case, fold full-width characters, and put spaces back between dashed or dotted letters."""
-    t = unicodedata.normalize("NFKC", text).lower()
+    t = canonicalize(text, confusables=False).lower()  # keep real Cyrillic words (e.g. 'три') readable
     t = re.sub(r"(?<=\w)[.\-_·*](?=\w\b)", "", t)  # 'f-a-l-c-o-n' -> 'falcon' (single-letter runs)
     return t
 
