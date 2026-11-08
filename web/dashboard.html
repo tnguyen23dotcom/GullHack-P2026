@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leak dashboard</title>
+<style>
+  :root {
+    --bg: #eef2f4; --panel: #ffffff; --ink: #17252e; --muted: #5b6b75; --line: #cfd9de;
+    --accent: #0b6e8a; --soft: #e3ebef; --block: #b3261e; --block-bg: #fbe9e7;
+    --exact: #0b6e8a; --normalized: #7a5a00; --semantic: #6a3fa0; --fuzzy: #2e7d32;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f171c; --panel: #16222a; --ink: #e6eef2; --muted: #93a4ae; --line: #2a3b45;
+      --accent: #4fb3d1; --soft: #1f303a; --block: #ff8a80; --block-bg: #3a1c1a;
+      --exact: #4fb3d1; --normalized: #e0b84a; --semantic: #b69cf0; --fuzzy: #7bc67e;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif; }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 18px; }
+  header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  h1 { font-size: 1.25rem; margin: 0; }
+  .status { color: var(--muted); font-size: 0.85rem; }
+  button { font: inherit; cursor: pointer; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: 5px 12px; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .box { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
+  .box h2 { font-size: 0.9rem; margin: 0 0 6px; color: var(--muted); font-weight: 600; }
+  .big { font-size: 2rem; font-weight: 700; line-height: 1.1; }
+  .bar { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; margin-top: 4px; }
+  .bar .name { width: 78px; }
+  .bar .track { flex: 1; height: 8px; background: var(--soft); border-radius: 4px; overflow: hidden; }
+  .bar .fill { height: 100%; }
+  .bar .n { width: 22px; text-align: right; }
+  .feed { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .feed h2 { font-size: 1rem; margin: 0; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  .scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; min-width: 640px; }
+  th, td { text-align: left; padding: 9px 16px; border-bottom: 1px solid var(--line); font-size: 0.9rem; vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  tr:last-child td { border-bottom: 0; }
+  code { font-family: Consolas, "SF Mono", monospace; background: var(--soft); padding: 1px 6px; border-radius: 4px; }
+  .tag { display: inline-block; padding: 1px 9px; border-radius: 10px; font-size: 0.8rem; font-weight: 600; border: 1px solid currentColor; }
+  .blocked { color: var(--block); background: var(--block-bg); border-color: var(--block); }
+  .flagged { color: var(--muted); }
+  .empty { padding: 24px 16px; color: var(--muted); }
+  @media (prefers-reduced-motion: no-preference) { tr.fresh { animation: flash 1.6s ease-out; } }
+  @keyframes flash { from { background: var(--block-bg); } to { background: transparent; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Leak dashboard</h1>
+      <div class="status" id="status"></div>
+    </div>
+    <button type="button" id="sim">Add test leak</button>
+  </header>
+
+  <section class="stats" aria-label="Summary">
+    <div class="box"><h2>Leaks caught</h2><div class="big" id="total">0</div></div>
+    <div class="box"><h2>Sessions blocked</h2><div class="big" id="blocked">0</div></div>
+    <div class="box"><h2>Caught by layer</h2><div id="layers"></div></div>
+  </section>
+
+  <section class="feed">
+    <h2>Leak feed</h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Time</th><th>Session</th><th>Attack</th><th>Layer</th><th>Score</th><th>Action</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="empty" hidden>No leaks yet. Attack the bot from the chat page.</div>
+  </section>
+</div>
+
+<script>
+  // ---- CONFIG ----
+  // Issue #19: mock data. Issue #20: set USE_MOCK = false and paste Person A's read endpoint.
+  const USE_MOCK = false; // change this to false when Person A gives me the alerts endpoint
+  //const ALERTS_URL = "https://REPLACE-ME.execute-api.us-east-1.amazonaws.com/alerts"; // Paste person A URL link
+  const ALERTS_URL = "https://94v13m7mj1.execute-api.us-east-1.amazonaws.com/alerts";
+  const POLL_MS = 3000;
+
+  // Assumed alert shape (agree on it with Person A):
+  // { id, time (ISO string), session_id, attack_type, layer, score (0-1 or null), blocked (bool) }
+  const LAYERS = ["exact", "normalized", "semantic", "fuzzy"];
+  const ATTACKS = ["verbatim", "translation", "encoding", "obfuscation", "paraphrase"];
+  const now = Date.now();
+  const mockAlerts = [
+    { id: "a1", time: new Date(now - 9 * 60000).toISOString(), session_id: "3f9a1c2e-0001", attack_type: "verbatim",    layer: "exact",      score: 1.0,  blocked: true },
+    { id: "a2", time: new Date(now - 7 * 60000).toISOString(), session_id: "b71d44aa-0002", attack_type: "encoding",    layer: "normalized", score: 1.0,  blocked: true },
+    { id: "a3", time: new Date(now - 5 * 60000).toISOString(), session_id: "c20e8f13-0003", attack_type: "obfuscation", layer: "normalized", score: 1.0,  blocked: true },
+    { id: "a4", time: new Date(now - 3 * 60000).toISOString(), session_id: "d84b6a07-0004", attack_type: "translation", layer: "semantic",   score: 0.86, blocked: true },
+    { id: "a5", time: new Date(now - 1 * 60000).toISOString(), session_id: "e19c3b55-0005", attack_type: "paraphrase",  layer: "semantic",   score: 0.78, blocked: false }
+  ];
+
+  const rows = document.getElementById("rows");
+  const seen = new Set();
+  let alerts = [];
+
+  function cell(tr, text) {
+    const td = document.createElement("td");
+    td.textContent = text;
+    tr.appendChild(td);
+    return td;
+  }
+
+  function render() {
+    alerts.sort((a, b) => new Date(b.time) - new Date(a.time));
+    rows.replaceChildren();
+    document.getElementById("empty").hidden = alerts.length > 0;
+
+    alerts.forEach(function (a) {
+      const tr = document.createElement("tr");
+      if (!seen.has(a.id)) { tr.className = "fresh"; seen.add(a.id); }
+      cell(tr, new Date(a.time).toLocaleTimeString());
+      const s = cell(tr, "");
+      const code = document.createElement("code");
+      code.textContent = String(a.session_id).slice(0, 8);
+      code.title = a.session_id;
+      s.appendChild(code);
+      cell(tr, a.attack_type || "unknown");
+      const lt = cell(tr, "");
+      const tag = document.createElement("span");
+      tag.className = "tag";
+      tag.style.color = "var(--" + a.layer + ", var(--ink))";
+      tag.textContent = a.layer;
+      lt.appendChild(tag);
+      cell(tr, a.score == null ? "n/a" : Number(a.score).toFixed(2));
+      const at = cell(tr, "");
+      const t2 = document.createElement("span");
+      t2.className = "tag " + (a.blocked ? "blocked" : "flagged");
+      t2.textContent = a.blocked ? "Session blocked" : "Flagged only";
+      at.appendChild(t2);
+      rows.appendChild(tr);
+    });
+
+    document.getElementById("total").textContent = alerts.length;
+    document.getElementById("blocked").textContent = new Set(
+      alerts.filter(function (a) { return a.blocked; }).map(function (a) { return a.session_id; })
+    ).size;
+
+    const box = document.getElementById("layers");
+    box.replaceChildren();
+    LAYERS.forEach(function (name) {
+      const n = alerts.filter(function (a) { return a.layer === name; }).length;
+      const row = document.createElement("div");
+      row.className = "bar";
+      const label = document.createElement("span");
+      label.className = "name";
+      label.textContent = name;
+      const track = document.createElement("span");
+      track.className = "track";
+      const fill = document.createElement("span");
+      fill.className = "fill";
+      fill.style.display = "block";
+      fill.style.background = "var(--" + name + ")";
+      fill.style.width = (alerts.length ? (n / alerts.length) * 100 : 0) + "%";
+      track.appendChild(fill);
+      const count = document.createElement("span");
+      count.className = "n";
+      count.textContent = n;
+      row.append(label, track, count);
+      box.appendChild(row);
+    });
+  }
+
+  function setStatus(text) { document.getElementById("status").textContent = text; }
+
+  async function load() {
+    if (USE_MOCK) { setStatus("Showing sample data"); render(); return; }
+    try {
+      const res = await fetch(ALERTS_URL);
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const data = await res.json();
+      alerts = Array.isArray(data) ? data : (data.alerts || []);
+      setStatus("Live. Updated " + new Date().toLocaleTimeString());
+      render();
+    } catch (err) {
+      setStatus("Cannot reach alerts service (" + err.message + "). Retrying.");
+    }
+  }
+
+  document.getElementById("sim").addEventListener("click", function () {
+    const layer = LAYERS[Math.floor(Math.random() * 3)];
+    alerts.push({
+      id: "t" + Date.now(),
+      time: new Date().toISOString(),
+      session_id: Math.random().toString(16).slice(2, 10) + "-test",
+      attack_type: ATTACKS[Math.floor(Math.random() * ATTACKS.length)],
+      layer: layer,
+      score: layer === "semantic" ? 0.7 + Math.random() * 0.3 : 1.0,
+      blocked: Math.random() > 0.2
+    });
+    render();
+  });
+
+  if (USE_MOCK) { alerts = mockAlerts.slice(); document.getElementById("sim").hidden = false; }
+  else { document.getElementById("sim").hidden = true; setInterval(load, POLL_MS); }
+  load();
+</script>
+</body>
+</html>
