@@ -7,6 +7,24 @@ This is your own README on the `person-a-infra` branch. It lists your tasks, the
 - **Your issues:** #1 to #5, plus the shared rehearsal issue #23
 - **Project overview:** see the README on `main`
 
+## How to deploy (one command)
+
+**Before the first deploy in a new AWS account:**
+1. Install Terraform and the AWS CLI, then run `aws configure` with a non-admin user (PowerUserAccess plus permission to create `canary-gateway-*` IAM roles).
+2. Turn on billing alerts: Billing and Cost Management → Billing preferences → Alert preferences → Receive CloudWatch billing alerts (root user, once).
+3. Bedrock: Amazon Nova 2 Lite (our default model) works without a request form.
+4. Create `infra/terraform/secrets.auto.tfvars` with `alert_email = "you@example.com"`. This file is git-ignored.
+
+**Deploy:**
+- Windows: `.\infra\deploy.ps1`
+- Mac/Linux: `./infra/deploy.sh`
+
+The script checks your tools and AWS login, runs `terraform plan`, asks for confirmation, applies, and prints the chat and alerts URLs. Confirm the two AWS subscription emails after the first deploy.
+
+**Billing alarm:** emails you when estimated monthly charges reach $10 (change `billing_alarm_usd` in `terraform.tfvars`).
+
+**Tear down:** `cd infra/terraform` then `terraform destroy`.
+
 ## Your tasks at a glance
 
 | Issue | Hours | Task | Priority |
